@@ -1,0 +1,31 @@
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local environments and tooling
+.venv/
+venv/
+.idea/
+.vscode/
+.pytest_cache/
+.ruff_cache/
+
+# Logs, temporary files, and operating-system metadata
+*.log
+*.tmp
+*.bak
+*.orig
+*~
+.DS_Store
+Thumbs.db
+
+# Local user data and atomic-write temporary file
+personas.json
+personas.json.tmp
+
+# Local development snapshots and generated output
+_versions/
+output/
+outputs/
+tmp/
