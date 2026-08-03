@@ -2,6 +2,8 @@
 
 **Alpha 0.3.0-alpha.1**
 
+[![Validate](https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/actions/workflows/validate.yml)
+
 A Forge Neo extension that turns a short image idea into a polished,
 natural-language KREA2 prompt. It reuses the Qwen3-VL encoder and tokenizer
 already owned by the active KREA2 diffusion engine. It does not download or
@@ -46,13 +48,13 @@ Clone or copy this repository into the Forge Neo `extensions` directory:
 
 ```powershell
 cd sd-webui-forge-neo/extensions
-git clone https://github.com/vibecodingtoolmaker/Forge-KREA2-Prompt-Assistant.git
+git clone https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant.git
 ```
 
 ```text
 sd-webui-forge-neo/
 └── extensions/
-    └── Forge-KREA2-Prompt-Assistant/
+    └── forge-krea-prompt-assistant/
 ```
 
 Restart Forge Neo. The `KREA2 Prompt Assistant` tab will appear in the main UI.
@@ -161,6 +163,18 @@ framework determinism.
 - no Z-Image backend yet;
 - no prompt history;
 - no dedicated Pony, Illustrious, or NoobAI tag-prompt adapters.
+
+## Feedback and security
+
+Please use the repository's structured
+[issue forms](https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/issues/new/choose)
+for reproducible bug reports and focused feature requests. Remove personal
+prompts, personas, images, local paths, access tokens, and unrelated log data
+before submitting diagnostic information.
+
+Do not disclose suspected vulnerabilities in a public issue. Follow the
+[security policy](SECURITY.md) and use GitHub's private vulnerability reporting
+flow from the repository's Security tab.
 
 ## License
 

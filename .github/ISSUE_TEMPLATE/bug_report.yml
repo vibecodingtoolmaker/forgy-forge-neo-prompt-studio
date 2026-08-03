@@ -1,0 +1,83 @@
+name: Bug report
+description: Report a reproducible problem with the Forge KREA2 Prompt Assistant.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve the alpha. Do not post vulnerabilities, secrets, private prompts/personas, generated images, or unredacted personal paths here.
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      description: Use the version shown in the extension UI or GitHub release.
+      placeholder: v0.3.0-alpha.1
+    validations:
+      required: true
+
+  - type: input
+    id: forge-version
+    attributes:
+      label: Forge Neo version
+      placeholder: "2.28"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, GPU and VRAM, model, text encoder, VAE, and relevant launch options.
+      placeholder: Windows 11, RTX ..., KREA2 ..., Qwen3-VL ..., Wan2.1 VAE ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reliable sequence that triggers the problem.
+      placeholder: |
+        1. Load ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant redacted logs
+      description: Paste only the relevant lines after removing personal paths, prompts, tokens, and unrelated data.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I reproduced the issue with the latest published alpha.
+          required: true
+        - label: I searched existing issues for a duplicate.
+          required: true
+        - label: I removed secrets and personal or copyrighted content from this report.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

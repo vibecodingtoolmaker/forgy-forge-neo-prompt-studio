@@ -4,4 +4,6 @@
 *.md text eol=lf
 *.json text eol=lf
 *.ini text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 LICENSE text eol=lf

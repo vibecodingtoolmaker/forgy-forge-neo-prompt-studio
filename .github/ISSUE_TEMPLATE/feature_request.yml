@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a focused improvement for the Forge KREA2 Prompt Assistant.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user problem first and keep the proposal focused on the extension's role as a local prompt-generation workhorse.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What is difficult or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired workflow and user-visible result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Mention workarounds or simpler approaches you already tried.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add non-sensitive examples or references that clarify the request.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
+        - label: I removed private prompts, personas, images, tokens, and unrelated personal data.
+          required: true
