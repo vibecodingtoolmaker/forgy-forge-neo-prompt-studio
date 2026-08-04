@@ -14,7 +14,7 @@ body:
     attributes:
       label: Extension version
       description: Use the version shown in the extension UI or GitHub release.
-      placeholder: v0.3.0-alpha.1
+      placeholder: v0.5.0-alpha.1
     validations:
       required: true
 

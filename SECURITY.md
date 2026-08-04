@@ -7,7 +7,7 @@ provided on a best-effort basis for the latest published alpha only.
 
 | Version | Supported |
 |---|---|
-| Latest `0.3.x` alpha | Yes |
+| Latest `0.5.x` alpha | Yes |
 | Older versions | No |
 
 Before reporting a problem, reproduce it with the latest release when that can

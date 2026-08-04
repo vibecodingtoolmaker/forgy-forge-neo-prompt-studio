@@ -23,6 +23,8 @@ Thumbs.db
 # Local user data and atomic-write temporary file
 personas.json
 personas.json.tmp
+image_personas.json
+image_personas.json.tmp
 
 # Local development snapshots and generated output
 _versions/
