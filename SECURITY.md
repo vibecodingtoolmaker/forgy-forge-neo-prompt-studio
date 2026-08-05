@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Forgy Prompt Studio is currently a beta project. Security fixes are provided on
-a best-effort basis for the latest published beta only.
+Forgy — Forge Neo Prompt Studio is currently a beta project. Security fixes are
+provided on a best-effort basis for the latest published beta only.
 
 | Version | Supported |
 |---|---|

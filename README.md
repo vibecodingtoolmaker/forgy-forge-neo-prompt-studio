@@ -1,8 +1,8 @@
-# Forgy Prompt Studio
+# Forgy — Forge Neo Prompt Studio
 
 **Beta 0.5.0-beta.1**
 
-[![Validate](https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/actions/workflows/validate.yml)
+[![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
 A Forge Neo extension that turns a short image idea or an uploaded reference
 image into a polished image-generation prompt and can iteratively refine an
@@ -24,7 +24,7 @@ constructive contributions are very welcome.
 
 ## AI-assisted development transparency
 
-Forgy Prompt Studio is created and maintained by
+Forgy — Forge Neo Prompt Studio is created and maintained by
 **vibecodingtoolmaker** with substantial AI-assisted development support from
 **OpenAI Codex**. Code, documentation, reviews, and test ideas have been
 developed and refined through this collaborative workflow — also known, with
@@ -46,8 +46,8 @@ Development and initial testing target Forge Neo 2.28.
 
 The first adapter supports the KREA2 model family with its Qwen3-VL 4B text and
 vision encoder and a compatible VAE. Future model families are intended to use
-separate adapters while sharing Forgy Prompt Studio's neutral workflows,
-personas, and controls.
+separate adapters while sharing the studio's neutral workflows, personas, and
+controls.
 
 ## Installation
 
@@ -55,23 +55,24 @@ Clone or copy this repository into the Forge Neo `extensions` directory:
 
 ```powershell
 cd sd-webui-forge-neo/extensions
-git clone https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant.git
+git clone https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio.git
 ```
 
 ```text
 sd-webui-forge-neo/
 └── extensions/
-    └── forge-krea-prompt-assistant/
+    └── forgy-forge-neo-prompt-studio/
 ```
 
-Restart Forge Neo. The `Forgy Prompt Studio` tab will appear in the main UI.
+Restart Forge Neo. The `Forgy — Forge Neo Prompt Studio` tab will appear in the
+main UI.
 No additional Python packages are required.
 
 ## Usage
 
 1. Select a supported model, its matching text encoder, and VAE in Forge's
    normal model controls.
-2. Open `Forgy Prompt Studio`. If the selection has not been loaded yet,
+2. Open `Forgy — Forge Neo Prompt Studio`. If the selection has not been loaded yet,
    click `Load current Forge selection` in the compact runtime bar at the top.
 3. Start in `Forgy Chat`, or open `Idea to prompt`, `Image to prompt`, or
    `Refine prompt` for a focused workflow.
@@ -346,7 +347,7 @@ reports, and a separate Z-Image adapter.
 ## Feedback and security
 
 Please use the repository's structured
-[issue forms](https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/issues/new/choose)
+[issue forms](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/issues/new/choose)
 for reproducible bug reports and focused feature requests. Remove personal
 prompts, personas, images, local paths, access tokens, and unrelated log data
 before submitting diagnostic information.

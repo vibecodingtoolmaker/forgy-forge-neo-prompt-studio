@@ -1,4 +1,4 @@
-# Project Status: Forgy Prompt Studio
+# Project Status: Forgy — Forge Neo Prompt Studio
 
 Last updated: 2026-08-05
 
@@ -7,18 +7,19 @@ chat. Read `AGENTS.md` before changing the project.
 
 ## Quick orientation
 
-- Workspace: a Forge Neo checkout containing this repository under
-  `extensions/forge-krea-prompt-assistant`
+- Workspace: a Forge Neo checkout containing this extension repository. An
+  existing working copy may retain its pre-rename directory name.
 - Extension repository: the directory containing this status file
 - Public repository:
-  `https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant`
+  `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`
 - Development branch: `develop`; public release branch: `main`
 - Current published prerelease: `v0.5.0-beta.1` (2026-08-05)
 - Previous release: `v0.5.0-alpha.1` / commit `6a0762a`
-- The extension's public name is now **Forgy Prompt Studio**. The repository
-  directory, Python filename, Gradio element IDs, callback names, and internal
-  Forge tab ID still contain `forge_krea_prompt_assistant` or `forge-krea` on
-  purpose. Renaming those identifiers is a separate compatibility migration.
+- The extension's public name is now **Forgy — Forge Neo Prompt Studio**. The
+  Python filename, Gradio element IDs, callback names, and internal Forge tab ID
+  still contain `forge_krea_prompt_assistant` or `forge-krea` on purpose.
+  Existing installations may also retain their original directory name.
+  Renaming those identifiers is a separate compatibility migration.
 
 The Beta 1 release includes the main script, tests, public documentation,
 metadata, issue forms, all four persona examples, license header, security
@@ -121,9 +122,9 @@ selections.
   the VRAM-profile information to the bottom of every workflow.
 - Promoted Forgy Chat to the first tab and moved its image attachment and Forge
   actions into the main visible flow.
-- Renamed the product to **Forgy Prompt Studio**, changed the version marker to
-  `0.5.0-beta.1`, and neutralized general KREA2-specific UI, persona, metadata,
-  issue-form, security, and README wording.
+- Renamed the product to **Forgy — Forge Neo Prompt Studio**, retained the
+  `0.5.0-beta.1` version marker, and neutralized general KREA2-specific UI,
+  persona, metadata, issue-form, security, and README wording.
 - Updated documentation to describe KREA2/Qwen3-VL as the first backend adapter
   rather than the product identity.
 
@@ -181,9 +182,10 @@ The detailed chronological list is also in `CHANGELOG.md` under
 ### Compatibility identifiers
 
 Keep `forge_krea_prompt_assistant`, existing `forge-krea-*` element classes, the
-script filename, and repository directory unchanged until an explicit migration
-plan accounts for Forge `ui-config.json`, callback names, CSS selectors, user
-installations, and GitHub URLs.
+script filename, and existing installation directories unchanged until an
+explicit migration plan accounts for Forge `ui-config.json`, callback names,
+CSS selectors, and user installations. The public GitHub repository URL is the
+new `forgy-forge-neo-prompt-studio` location.
 
 ## Known bugs, risks, and open problems
 
@@ -208,9 +210,9 @@ following risks remain:
 - Image-to-Prompt analyzes an image to produce text. It does not implement
   img2img conditioning, reference-image styling, identity editing, or automatic
   parameter changes.
-- The repository/folder/internal IDs still use the old KREA2-oriented slug.
-  This is deliberate for compatibility but should eventually be reviewed as a
-  separately planned migration.
+- The Python/script, callback, Gradio, and CSS identifiers still use the older
+  KREA-oriented naming. This is deliberate for compatibility but should
+  eventually be reviewed as a separately planned migration.
 - Visual polish and responsive layout are not final. Very narrow browser widths,
   high UI scaling, and unusually long translated button labels may need more
   CSS work.
@@ -266,7 +268,7 @@ Re-run the automated checks after any further change and immediately before a
 commit or release:
 
 ```powershell
-cd <Forge Neo checkout>\extensions\forge-krea-prompt-assistant
+cd <extension repository>
 & ..\..\venv\Scripts\python.exe -m unittest discover -s tests -v
 & ..\..\venv\Scripts\ruff.exe check scripts\forge_krea_prompt_assistant.py tests\test_public_metadata.py
 & ..\..\venv\Scripts\ruff.exe format --check scripts\forge_krea_prompt_assistant.py tests\test_public_metadata.py

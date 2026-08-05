@@ -4,14 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-No changes yet.
+- Renamed the public product to `Forgy — Forge Neo Prompt Studio` across the UI,
+  documentation, support files, and repository metadata.
+- Updated installation, workflow badge, issue, release, and comparison links
+  for `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`.
+- Kept compatibility-sensitive Python names, callback and tab IDs, CSS classes,
+  and existing installation directories unchanged.
 
 ## 0.5.0-beta.1 - 2026-08-05
 
-- Renamed the extension to `Forgy Prompt Studio`, promoted the version marker to
-  `0.5.0-beta.1`, and made its general UI, status, persona, metadata, and support
-  language model-family neutral. The README now documents KREA2/Qwen3-VL only
-  as the first concrete backend adapter rather than as the product identity.
+- Replaced the extension's original KREA2-oriented public identity, promoted
+  the version marker to `0.5.0-beta.1`, and made its general UI, status,
+  persona, metadata, and support language model-family neutral. The README now
+  documents KREA2/Qwen3-VL only as the first concrete backend adapter rather
+  than as the product identity.
 - Made the workflow guidance friendlier and less formal: Idea-to-Prompt now
   invites users to let Forgy develop their picture idea, and both primary input
   workflows describe their optional instruction as a refinement alongside the
@@ -145,7 +151,7 @@ No changes yet.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/compare/v0.5.0-beta.1...HEAD
-[0.5.0-beta.1]: https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/compare/v0.5.0-alpha.1...v0.5.0-beta.1
-[0.5.0-alpha.1]: https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/compare/v0.3.0-alpha.1...v0.5.0-alpha.1
-[0.3.0-alpha.1]: https://github.com/vibecodingtoolmaker/forge-krea-prompt-assistant/releases/tag/v0.3.0-alpha.1
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...HEAD
+[0.5.0-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-alpha.1...v0.5.0-beta.1
+[0.5.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.3.0-alpha.1...v0.5.0-alpha.1
+[0.3.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/releases/tag/v0.3.0-alpha.1

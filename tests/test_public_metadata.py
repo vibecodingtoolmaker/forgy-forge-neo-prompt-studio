@@ -109,13 +109,20 @@ class PublicMetadataTests(unittest.TestCase):
         )
 
     def test_public_beta_branding_and_version(self) -> None:
-        self.assertEqual(self.constants["EXTENSION_NAME"], "Forgy Prompt Studio")
+        self.assertEqual(
+            self.constants["EXTENSION_NAME"],
+            "Forgy — Forge Neo Prompt Studio",
+        )
         self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.0-beta.1")
-        self.assertIn("# Forgy Prompt Studio", self.readme)
+        self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
         self.assertIn("**Beta 0.5.0-beta.1**", self.readme)
-        self.assertIn("Name = Forgy Prompt Studio", self.metadata)
-        self.assertIn("Forgy Prompt Studio", self.security)
-        self.assertTrue(self.license.startswith("Forgy Prompt Studio\n"))
+        self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
+        self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
+        self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))
+        self.assertIn(
+            "https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio",
+            self.readme,
+        )
         self.assertIn(
             'gr.Markdown(f"### {EXTENSION_NAME} — {EXTENSION_VERSION}")',
             self.source,
@@ -330,7 +337,7 @@ class PublicMetadataTests(unittest.TestCase):
                 "PromptAssistantError": error_type,
                 "_forge_stack_status": lambda: (
                     True,
-                    "**Forgy Prompt Studio is ready.**",
+                    "**Forgy — Forge Neo Prompt Studio is ready.**",
                 ),
                 "time": time,
                 "torch": SimpleNamespace(OutOfMemoryError=RuntimeError),
@@ -344,7 +351,7 @@ class PublicMetadataTests(unittest.TestCase):
             result = loader()
 
         self.assertEqual(calls, [("refresh", {"refresh": True}), "reload"])
-        self.assertIn("Forgy Prompt Studio is ready", result)
+        self.assertIn("Forgy — Forge Neo Prompt Studio is ready", result)
 
     def test_generation_cancel_request_lifecycle(self) -> None:
         namespace = {

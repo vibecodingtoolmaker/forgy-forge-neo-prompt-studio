@@ -1,4 +1,4 @@
-# Development Rules for Forgy Prompt Studio
+# Development Rules for Forgy — Forge Neo Prompt Studio
 
 Read `PROJECT_STATUS.md` before working on this repository.
 
@@ -22,9 +22,10 @@ Read `PROJECT_STATUS.md` before working on this repository.
 - Isolate model-family behavior in explicit adapters. The current
   KREA2/Qwen3-VL functions are the first adapter; unsupported stacks must fail
   clearly instead of using a guessed fallback.
-- Preserve the internal ID `forge_krea_prompt_assistant`, repository/folder and
-  script names, callback names, existing element IDs, and `forge-krea-*` CSS
-  classes unless the task explicitly includes a compatibility migration.
+- Preserve the internal ID `forge_krea_prompt_assistant`, script names,
+  callback names, existing element IDs, and `forge-krea-*` CSS classes unless
+  the task explicitly includes a compatibility migration. Do not relocate or
+  rename an existing user's extension directory during a normal update.
 - Do not add a `requirements.txt` for modules already supplied by Python or
   Forge. Introduce a dependency only when the feature truly requires it and
   document why Forge's environment does not already provide it.

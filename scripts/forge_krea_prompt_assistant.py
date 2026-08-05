@@ -1,4 +1,4 @@
-"""Forgy Prompt Studio reuses Forge Neo's active text and vision encoder.
+"""Forgy — Forge Neo Prompt Studio reuses Forge Neo's active text and vision encoder.
 
 Copyright (C) 2026 vibecodingtoolmaker
 SPDX-License-Identifier: AGPL-3.0-only
@@ -35,7 +35,7 @@ from modules import call_queue, script_callbacks, shared
 
 
 LOGGER = logging.getLogger("forgy_prompt_studio")
-EXTENSION_NAME = "Forgy Prompt Studio"
+EXTENSION_NAME = "Forgy — Forge Neo Prompt Studio"
 EXTENSION_VERSION = "0.5.0-beta.1"
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"
@@ -2258,7 +2258,7 @@ def _forge_generate_click_js(element_id: str, target_name: str) -> str:
         ].filter(Boolean);
         const gallery = root.querySelector("#{tab_name}_gallery");
         if (!generateButton || activityButtons.length === 0) {{
-            console.warn("Forgy Prompt Studio: Forge generate button not found: {element_id}");
+            console.warn("Forgy — Forge Neo Prompt Studio: Forge generate button not found: {element_id}");
             return "**Error:** Forge's {target_name} generation controls were not found.";
         }}
 
