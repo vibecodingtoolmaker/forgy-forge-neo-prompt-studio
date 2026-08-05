@@ -16,10 +16,6 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-import numpy as np
-from PIL import Image, ImageOps
-
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "forge_krea_prompt_assistant.py"
 PERSONAS_EXAMPLE = ROOT / "personas.example.json"
@@ -992,14 +988,27 @@ class PublicMetadataTests(unittest.TestCase):
         )
 
     def test_forgy_grabs_the_last_image_from_the_latest_forge_gallery(self) -> None:
+        class FakeImage:
+            def __init__(self, color):
+                self.color = color
+
+            def convert(self, _mode):
+                return self
+
+            def copy(self):
+                return FakeImage(self.color)
+
+            def getpixel(self, _position):
+                return self.color
+
         logger = SimpleNamespace(exception=lambda *args, **kwargs: None)
         temp_checks = []
         namespace = {
-            "Image": Image,
-            "ImageOps": ImageOps,
+            "Image": SimpleNamespace(Image=FakeImage),
+            "ImageOps": SimpleNamespace(exif_transpose=lambda image: image),
             "LOGGER": logger,
             "Path": Path,
-            "np": np,
+            "np": SimpleNamespace(ndarray=type("FakeArray", (), {})),
             "_ensure_forge_temp_directory": lambda: temp_checks.append(True),
         }
         latest = isolated_function(self.source, "_latest_gallery_image", namespace)
@@ -1008,9 +1017,9 @@ class PublicMetadataTests(unittest.TestCase):
         namespace["gr"] = SimpleNamespace(skip=lambda: skip_marker)
         grab = isolated_function(self.source, "_grab_last_forge_image", namespace)
 
-        red = Image.new("RGB", (2, 2), "red")
-        green = Image.new("RGB", (2, 2), "green")
-        blue = Image.new("RGB", (2, 2), "blue")
+        red = FakeImage((255, 0, 0))
+        green = FakeImage((0, 255, 0))
+        blue = FakeImage((0, 0, 255))
         image, status = grab(
             "img2img",
             [(red, None), (green, None)],

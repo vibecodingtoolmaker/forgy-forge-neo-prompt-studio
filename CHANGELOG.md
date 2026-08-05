@@ -103,6 +103,9 @@ No changes yet.
   generation tabs.
 - Added the same VRAM-aware sampling, deterministic seed reporting, busy state,
   cooperative Stop control, and Forge prompt-transfer actions to refinement.
+- Kept the public metadata test suite dependency-free so GitHub's minimal
+  Python validation can exercise gallery selection without installing Forge's
+  runtime NumPy and Pillow packages.
 
 ## 0.5.0-alpha.1 - 2026-08-04
 
