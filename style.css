@@ -1,0 +1,27 @@
+/* Keep longer persona lists visibly and predictably scrollable in Gradio. */
+.forge-krea-persona-dropdown ul.options {
+    overflow-y: scroll !important;
+    overscroll-behavior-y: contain;
+    scrollbar-color: var(--border-color-primary, #64748b)
+        var(--background-fill-secondary, transparent);
+    scrollbar-gutter: stable;
+    scrollbar-width: auto;
+}
+
+.forge-krea-persona-dropdown ul.options::-webkit-scrollbar {
+    width: 12px;
+}
+
+.forge-krea-persona-dropdown ul.options::-webkit-scrollbar-track {
+    background: var(--background-fill-secondary, transparent);
+}
+
+.forge-krea-persona-dropdown ul.options::-webkit-scrollbar-thumb {
+    background: var(--border-color-primary, #64748b);
+    border: 3px solid var(--background-fill-secondary, transparent);
+    border-radius: 999px;
+}
+
+.forge-krea-persona-dropdown ul.options::-webkit-scrollbar-thumb:hover {
+    background: var(--button-primary-background-fill, #f97316);
+}
