@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-Forge KREA2 Prompt Assistant is currently an alpha project. Security fixes are
-provided on a best-effort basis for the latest published alpha only.
+Forgy Prompt Studio is currently a beta project. Security fixes are provided on
+a best-effort basis for the latest published beta only.
 
 | Version | Supported |
 |---|---|
-| Latest `0.5.x` alpha | Yes |
+| Latest `0.5.x` beta | Yes |
 | Older versions | No |
 
 Before reporting a problem, reproduce it with the latest release when that can

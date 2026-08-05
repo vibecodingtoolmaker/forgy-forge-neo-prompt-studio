@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem with the Forge KREA2 Prompt Assistant.
+description: Report a reproducible problem with Forgy Prompt Studio.
 title: "[Bug]: "
 labels:
   - bug
@@ -7,14 +7,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping improve the alpha. Do not post vulnerabilities, secrets, private prompts/personas, generated images, or unredacted personal paths here.
+        Thank you for helping improve the beta. Do not post vulnerabilities, secrets, private prompts/personas, generated images, or unredacted personal paths here.
 
   - type: input
     id: extension-version
     attributes:
       label: Extension version
       description: Use the version shown in the extension UI or GitHub release.
-      placeholder: v0.5.0-alpha.1
+      placeholder: v0.5.0-beta.1
     validations:
       required: true
 
@@ -31,7 +31,7 @@ body:
     attributes:
       label: Environment
       description: Include OS, GPU and VRAM, model, text encoder, VAE, and relevant launch options.
-      placeholder: Windows 11, RTX ..., KREA2 ..., Qwen3-VL ..., Wan2.1 VAE ...
+      placeholder: Windows 11, RTX ..., model family ..., text encoder ..., VAE ...
     validations:
       required: true
 
@@ -73,7 +73,7 @@ body:
     attributes:
       label: Pre-submission checks
       options:
-        - label: I reproduced the issue with the latest published alpha.
+        - label: I reproduced the issue with the latest published beta.
           required: true
         - label: I searched existing issues for a duplicate.
           required: true

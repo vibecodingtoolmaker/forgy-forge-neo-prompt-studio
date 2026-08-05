@@ -25,6 +25,10 @@ personas.json
 personas.json.tmp
 image_personas.json
 image_personas.json.tmp
+refinement_personas.json
+refinement_personas.json.tmp
+agent_personas.json
+agent_personas.json.tmp
 
 # Local development snapshots and generated output
 _versions/
