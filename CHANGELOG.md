@@ -4,12 +4,40 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.1-alpha.1 - 2026-08-11
+
 - Renamed the public product to `Forgy — Forge Neo Prompt Studio` across the UI,
   documentation, support files, and repository metadata.
 - Updated installation, workflow badge, issue, release, and comparison links
   for `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`.
 - Kept compatibility-sensitive Python names, callback and tab IDs, CSS classes,
   and existing installation directories unchanged.
+- Added a dependency-free model adapter package with explicit model identity,
+  request-local component resolution, typed capabilities, and fail-closed model
+  selection.
+- Moved KREA2 stack validation, Qwen3-VL prompt protocol, visible-output
+  filtering, and runtime dispatch behind the first explicit adapter while
+  preserving the established generation loops and compatibility entry point.
+- Added capability-driven backend guards and dynamic Gradio workflow/image
+  control updates after Forge loads the user's current selection.
+- Added focused adapter, capability, no-persistent-model-state, and full Forge
+  bootstrap validation.
+- Added the initial Z-Image Base/Turbo adapter using Forge's active Qwen3-4B
+  encoder and the shared tied-embedding autoregressive text runtime. Forgy Chat,
+  Idea-to-Prompt, and Refine are enabled; vision workflows are explicitly
+  disabled.
+- Live-validated a bounded 64-token Z-Image Base/Qwen3-4B text request in an
+  isolated Forge process with no image generation, no saved settings, and model
+  unload afterward.
+- Made Forgy Chat accept harmless `FORGY reply:` / `UPDATED PROMPT:` marker
+  variations while still preserving the working prompt for unstructured model
+  output.
+- Added Z-Image-only workflow contracts for Idea-to-Prompt, Refine, and Forgy
+  Chat so the smaller Qwen treats user text as visual source content, preserves
+  explicit concepts, and follows each workflow's output shape. KREA2 prompt
+  rendering remains unchanged.
+- Added a visible capability explanation beside both disabled image inputs when
+  the active Forgy adapter is text-only.
 
 ## 0.5.0-beta.1 - 2026-08-05
 
@@ -151,7 +179,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.1-alpha.1...HEAD
+[0.5.1-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...v0.5.1-alpha.1
 [0.5.0-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-alpha.1...v0.5.0-beta.1
 [0.5.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.3.0-alpha.1...v0.5.0-alpha.1
 [0.3.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/releases/tag/v0.3.0-alpha.1

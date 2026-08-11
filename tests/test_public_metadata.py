@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import sys
 from tempfile import TemporaryDirectory
 import threading
@@ -16,8 +15,11 @@ import unittest
 from unittest.mock import patch
 import uuid
 
+from forgy.adapters import Krea2Adapter
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "forge_krea_prompt_assistant.py"
+MODEL_SOURCES = tuple(sorted((ROOT / "forgy").rglob("*.py")))
 PERSONAS_EXAMPLE = ROOT / "personas.example.json"
 IMAGE_PERSONAS_EXAMPLE = ROOT / "image_personas.example.json"
 REFINEMENT_PERSONAS_EXAMPLE = ROOT / "refinement_personas.example.json"
@@ -71,6 +73,9 @@ class PublicMetadataTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.source = SCRIPT.read_text(encoding="utf-8")
+        cls.model_source = "\n".join(
+            path.read_text(encoding="utf-8") for path in MODEL_SOURCES
+        )
         cls.constants = public_constants(cls.source)
         cls.personas = json.loads(PERSONAS_EXAMPLE.read_text(encoding="utf-8"))
         cls.image_personas = json.loads(
@@ -108,14 +113,14 @@ class PublicMetadataTests(unittest.TestCase):
             },
         )
 
-    def test_public_beta_branding_and_version(self) -> None:
+    def test_public_prerelease_branding_and_version(self) -> None:
         self.assertEqual(
             self.constants["EXTENSION_NAME"],
             "Forgy — Forge Neo Prompt Studio",
         )
-        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.0-beta.1")
+        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.1-alpha.1")
         self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
-        self.assertIn("**Beta 0.5.0-beta.1**", self.readme)
+        self.assertIn("**Alpha 0.5.1-alpha.1 (development prerelease)**", self.readme)
         self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
         self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
         self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))
@@ -141,7 +146,7 @@ class PublicMetadataTests(unittest.TestCase):
             'f"**{EXTENSION_NAME} is not ready.** Select a supported model family, "',
             self.source,
         )
-        self.assertIn("No supported model stack is active.", self.source)
+        self.assertIn("No supported model stack is active.", self.model_source)
         self.assertIn("Text encoder / VAE:", self.source)
         for outdated_text in (
             "KREA2 Prompt Assistant",
@@ -285,6 +290,7 @@ class PublicMetadataTests(unittest.TestCase):
                 "CHAT_USER_BOUNDARY": user_boundary,
                 "PromptAssistantError": error_type,
                 "_validate_system_prompt": validate,
+                "KREA2_ADAPTER": Krea2Adapter(),
             },
         )
         engine = SimpleNamespace(
@@ -311,6 +317,19 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertNotIn("main_entry.checkpoint_change(", self.source)
         self.assertNotIn("main_entry.modules_change(", self.source)
         self.assertNotIn("from_pretrained(", self.source)
+
+    def test_model_capabilities_gate_workflows_and_image_inputs(self) -> None:
+        self.assertIn("CAPABILITY_MANAGER = CapabilityManager()", self.source)
+        self.assertIn("def _model_capability_updates():", self.source)
+        self.assertIn("_require_workflow(model_context, workflow)", self.source)
+        self.assertIn(
+            "_require_workflow(model_context, workflow, vision_input=True)",
+            self.source,
+        )
+        self.assertIn("capability_refresh_event = model_load_event.then(", self.source)
+        self.assertGreaterEqual(
+            self.source.count("gr.update(value=None, interactive=False)"), 2
+        )
 
     def test_current_forge_selection_loader_only_refreshes_and_reloads(self) -> None:
         calls = []
@@ -394,6 +413,7 @@ class PublicMetadataTests(unittest.TestCase):
             "DEFAULT_IMAGE_REQUEST": "Describe the uploaded image.",
             "PromptAssistantError": error_type,
             "_validate_system_prompt": lambda value, **_kwargs: value,
+            "KREA2_ADAPTER": Krea2Adapter(),
         }
         render = isolated_function(self.source, "_render_generation_prompt", namespace)
         render_image = isolated_function(
@@ -777,7 +797,11 @@ class PublicMetadataTests(unittest.TestCase):
                 "PromptAssistantError": error_type,
                 "_clear_generation_request": lambda generation_id: None,
                 "_refinement_user_message": lambda prompt, instruction: "request",
-                "_run_generation": lambda *args: ("", "**Error:** simulated"),
+                "_run_generation": lambda *args, **kwargs: (
+                    "",
+                    "**Error:** simulated",
+                ),
+                "Workflow": SimpleNamespace(REFINE_PROMPT="refine_prompt"),
             },
         )
 
@@ -837,7 +861,7 @@ class PublicMetadataTests(unittest.TestCase):
         strip_thinking = isolated_function(
             self.source,
             "_strip_model_thinking",
-            {"re": re},
+            {"KREA2_ADAPTER": Krea2Adapter()},
         )
 
         cleaned, removed = strip_thinking(
@@ -866,7 +890,7 @@ class PublicMetadataTests(unittest.TestCase):
         decode = isolated_function(
             self.source,
             "_decode_generated_text",
-            {"re": re},
+            {"KREA2_ADAPTER": Krea2Adapter()},
         )
         decoded = decode(FakeTokenizer(), [1, 2, 3])
 
@@ -876,7 +900,7 @@ class PublicMetadataTests(unittest.TestCase):
         detect = isolated_function(
             self.source,
             "_repetition_loop_suffix",
-            {},
+            {"KREA2_ADAPTER": Krea2Adapter()},
         )
         block = list(range(32))
 
@@ -888,6 +912,7 @@ class PublicMetadataTests(unittest.TestCase):
             "FORGY_REPLY_MARKER": "FORGY_REPLY:",
             "FORGY_PROMPT_MARKER": "UPDATED_PROMPT:",
             "FORGY_UNCHANGED_MARKER": "[UNCHANGED]",
+            "re": __import__("re"),
         }
         strip_fence = isolated_function(self.source, "_strip_forgy_fence", namespace)
         namespace["_strip_forgy_fence"] = strip_fence
@@ -899,6 +924,15 @@ class PublicMetadataTests(unittest.TestCase):
         )
         self.assertEqual(reply, "I widened the shot.")
         self.assertEqual(prompt, "A wide shot.")
+        self.assertTrue(parsed)
+
+        reply, prompt, parsed = parse(
+            "FORGY reply: I kept the exact subject.\n\n"
+            "UPDATED_PROMPT: A fairytale scene on a bedpost.",
+            "",
+        )
+        self.assertEqual(reply, "I kept the exact subject.")
+        self.assertEqual(prompt, "A fairytale scene on a bedpost.")
         self.assertTrue(parsed)
 
         _, unchanged, parsed = parse(
@@ -953,9 +987,11 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIn("Paste an existing prompt here", forgy_block)
         self.assertNotIn('gr.Accordion("Optional image attachment"', forgy_block)
         self.assertLess(
-            forgy_block.index('"**Optional image attachment**'),
+            forgy_block.index("forgy_image_capability_notice = gr.Markdown("),
             forgy_block.index("forgy_image = gr.Image("),
         )
+        self.assertIn("**Optional image attachment**", self.source)
+        self.assertIn("Image input unavailable with", self.source)
         self.assertLess(
             forgy_block.index('forgy_prompt_action_status = gr.State("")'),
             forgy_block.index("agent_persona_controls = _create_persona_manager("),

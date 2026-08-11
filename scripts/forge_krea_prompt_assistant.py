@@ -3,9 +3,9 @@
 Copyright (C) 2026 vibecodingtoolmaker
 SPDX-License-Identifier: AGPL-3.0-only
 
-This release currently implements the KREA2 Qwen3-VL adapter. The extension
-never loads a language model; it operates only on encoder and tokenizer objects
-already owned by the active Forge diffusion engine.
+This prerelease implements KREA2 Qwen3-VL and Z-Image Qwen3 adapters.
+The extension never loads a language model; it operates only on encoder and
+tokenizer objects already owned by the active Forge diffusion engine.
 """
 
 from __future__ import annotations
@@ -33,10 +33,15 @@ from PIL import Image, ImageOps
 from backend import memory_management
 from modules import call_queue, script_callbacks, shared
 
+from forgy.adapters import AdapterError, Krea2Adapter, ZImageAdapter
+from forgy.capabilities import CapabilityManager, Workflow
+from forgy.model_manager import ModelContext, ModelManager
+
 
 LOGGER = logging.getLogger("forgy_prompt_studio")
 EXTENSION_NAME = "Forgy — Forge Neo Prompt Studio"
-EXTENSION_VERSION = "0.5.0-beta.1"
+EXTENSION_VERSION = "0.5.1-alpha.1"
+# Compatibility aliases retained for diagnostics and existing static integrations.
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"
 AUTO_VRAM_PROFILE = "Auto"
@@ -78,6 +83,10 @@ FORGY_MAX_PROMPT_VERSIONS = 50
 FORGY_MAX_OUTPUT_TOKENS = 4096
 QWEN_NO_THINK_DIRECTIVE = "/no_think"
 FORGY_CHAT_ELEMENT_ID = "forge_krea_forgy_chat"
+KREA2_ADAPTER = Krea2Adapter()
+ZIMAGE_ADAPTER = ZImageAdapter()
+MODEL_MANAGER = ModelManager((KREA2_ADAPTER, ZIMAGE_ADAPTER))
+CAPABILITY_MANAGER = CapabilityManager()
 DEFAULT_IMAGE_REQUEST = (
     "Create an image-generation prompt that faithfully reconstructs the uploaded image."
 )
@@ -629,8 +638,9 @@ def _forge_stack_status() -> tuple[bool, str]:
             "the active model stack as soon as Forge's model manager is ready."
         )
     try:
-        sd_model, _, _, _, _ = _active_krea_components(model_data.get_sd_model())
-    except PromptAssistantError as exc:
+        model_context = _active_model_context(model_data.get_sd_model())
+        sd_model = model_context.components.sd_model
+    except (PromptAssistantError, AdapterError) as exc:
         return False, (
             f"**{EXTENSION_NAME} is not ready.** Select a supported model family, "
             "its matching text encoder, and VAE in Forge's model controls, then "
@@ -658,6 +668,7 @@ def _forge_stack_status() -> tuple[bool, str]:
     )
     return True, (
         f"**{EXTENSION_NAME} is ready.** "
+        f"Adapter: **{html.escape(model_context.identity.display_name)}** · "
         f"Model: **{html.escape(checkpoint_name)}** · "
         f"Text encoder / VAE: {modules_display}"
     )
@@ -694,86 +705,134 @@ def _load_current_forge_selection():
         return f"**Load error:** {type(exc).__name__}: {exc}"
 
 
-def _active_krea_components(sd_model_override=None):
-    """Resolve, but never retain, the currently supported runtime components."""
+def _active_model_context(sd_model_override=None) -> ModelContext:
+    """Resolve Forge's active stack without retaining its live model objects."""
+
     sd_model = sd_model_override if sd_model_override is not None else shared.sd_model
-    if sd_model is None:
-        raise PromptAssistantError(
-            "No diffusion model is loaded. Use 'Load current Forge selection' above."
+    return MODEL_MANAGER.resolve(sd_model)
+
+
+def _current_workflow_states(sd_model_override=None) -> dict[Workflow, bool]:
+    """Resolve effective workflow switches without caching live Forge objects."""
+
+    disabled = {workflow: False for workflow in Workflow}
+    try:
+        model_context = _active_model_context(sd_model_override)
+        effective = CAPABILITY_MANAGER.resolve(model_context)
+    except (PromptAssistantError, AdapterError):
+        return disabled
+    return {workflow: effective.for_workflow(workflow).enabled for workflow in Workflow}
+
+
+def _model_capability_updates():
+    """Refresh model-dependent controls after Forge loads the user's selection."""
+
+    states = _current_workflow_states()
+    chat_enabled = states[Workflow.FORGY_CHAT]
+    image_enabled = states[Workflow.IMAGE_TO_PROMPT]
+    forgy_image_enabled = chat_enabled and image_enabled
+    forgy_image_notice, image_workflow_notice = _image_capability_messages()
+    source_image_update = (
+        gr.update(interactive=True)
+        if image_enabled
+        else gr.update(value=None, interactive=False)
+    )
+    forgy_image_update = (
+        gr.update(interactive=True)
+        if forgy_image_enabled
+        else gr.update(value=None, interactive=False)
+    )
+    return (
+        gr.update(interactive=states[Workflow.IDEA_TO_PROMPT]),
+        gr.update(interactive=image_enabled),
+        gr.update(interactive=states[Workflow.REFINE_PROMPT]),
+        gr.update(interactive=chat_enabled),
+        source_image_update,
+        forgy_image_update,
+        gr.update(interactive=forgy_image_enabled),
+        gr.update(value=forgy_image_notice),
+        gr.update(value=image_workflow_notice),
+    )
+
+
+def _image_capability_messages(sd_model_override=None) -> tuple[str, str]:
+    """Describe image-input availability without retaining live Forge objects."""
+
+    try:
+        model_context = _active_model_context(sd_model_override)
+        availability = CAPABILITY_MANAGER.resolve(model_context).for_workflow(
+            Workflow.IMAGE_TO_PROMPT
+        )
+    except (PromptAssistantError, AdapterError):
+        unavailable = (
+            "**Image input unavailable:** Load a supported vision-capable Forge "
+            "selection above."
+        )
+        return unavailable, unavailable
+
+    if availability.enabled:
+        return (
+            "**Optional image attachment**  \n"
+            "The image is included with every message until you clear or replace "
+            "it. It is processed locally and is not stored by the extension.",
+            "The uploaded image is processed locally and is not stored by the "
+            "extension. The optional instruction is the complete user request sent "
+            "alongside the image.",
         )
 
-    if _class_path(sd_model) != "backend.diffusion_engine.krea.Krea2":
-        raise PromptAssistantError(
-            "No supported model stack is active. "
-            f"Active model: {_class_path(sd_model)}. Select a supported stack in "
-            "Forge, then use 'Load current Forge selection' above."
+    display_name = html.escape(model_context.identity.display_name)
+    unavailable = (
+        f"**Image input unavailable with {display_name}:** This Forgy adapter is "
+        "text-only. Image upload and Image to prompt are disabled; txt2img and "
+        "img2img generation in Forge remain available."
+    )
+    return unavailable, unavailable
+
+
+def _require_workflow(
+    model_context: ModelContext,
+    workflow: Workflow,
+    *,
+    vision_input: bool = False,
+) -> None:
+    effective = CAPABILITY_MANAGER.resolve(model_context)
+    availability = effective.for_workflow(workflow)
+    if not availability.enabled:
+        raise AdapterError(availability.reason)
+    if vision_input and not model_context.capabilities.vision_input:
+        raise AdapterError(
+            f"{model_context.identity.display_name} has no vision input."
         )
 
-    forge_objects = getattr(sd_model, "forge_objects", None)
-    clip = getattr(forge_objects, "clip", None)
-    cond_stage_model = getattr(clip, "cond_stage_model", None)
-    tokenizer_container = getattr(clip, "tokenizer", None)
-    encoder = getattr(cond_stage_model, "qwen3vl_4b", None)
-    tokenizer = getattr(tokenizer_container, "qwen3vl_4b", None)
-    engine = getattr(sd_model, "text_processing_engine_qwen", None)
 
-    if clip is None or encoder is None or tokenizer is None or engine is None:
-        raise PromptAssistantError(
-            "The expected text encoder and tokenizer objects for the active model "
-            "adapter were not found. Select a complete supported stack in Forge, "
-            "then use 'Load current Forge selection' above."
-        )
+def _active_krea_components(sd_model_override=None):
+    """Compatibility wrapper for the first KREA2 adapter's request-local objects."""
 
-    if getattr(engine, "text_encoder", None) is not encoder:
+    model_context = _active_model_context(sd_model_override)
+    if model_context.identity.adapter_id != KREA2_ADAPTER.adapter_id:
         raise PromptAssistantError(
-            "Forge is using unexpectedly different text encoder objects."
+            f"The active adapter is {model_context.identity.adapter_id}, not KREA2."
         )
-    if getattr(engine, "tokenizer", None) is not tokenizer:
-        raise PromptAssistantError(
-            "Forge is using unexpectedly different tokenizer objects."
-        )
-    if (
-        type(encoder).__module__ != KREA2_ENCODER_MODULE
-        or type(encoder).__name__ != KREA2_ENCODER_CLASS
-    ):
-        raise PromptAssistantError(
-            "The active text encoder class is not supported by this adapter: "
-            f"{_class_path(encoder)}"
-        )
-
-    patcher = getattr(clip, "patcher", None)
-    if patcher is None:
-        raise PromptAssistantError("The text encoder's Forge ModelPatcher is missing.")
-
-    return sd_model, clip, encoder, tokenizer, engine
+    components = model_context.components
+    return (
+        components.sd_model,
+        components.clip,
+        components.encoder,
+        components.tokenizer,
+        components.engine,
+    )
 
 
 def _render_generation_prompt(
     engine, idea: str, instruction: str, system_prompt: str
 ) -> str:
-    template = getattr(engine, "llama_template", None)
-    if not isinstance(template, str) or template.count("{}") != 1:
-        raise PromptAssistantError("The active chat template is incompatible.")
-    if (
-        template.count(CHAT_SYSTEM_START) != 1
-        or template.count(CHAT_USER_BOUNDARY) != 1
-    ):
-        raise PromptAssistantError(
-            "The role structure of the active chat template is incompatible."
-        )
-
-    system_prompt = _validate_system_prompt(system_prompt, allow_empty=True)
-    user_message = idea.strip()
-    instruction = str(instruction or "").strip()
-    if instruction:
-        user_message += f"\n\nAdditional instruction:\n{instruction}"
-    rendered = template.format(user_message)
-    system_start = rendered.index(CHAT_SYSTEM_START) + len(CHAT_SYSTEM_START)
-    system_end = rendered.index(CHAT_USER_BOUNDARY, system_start)
-    rendered = rendered[:system_start] + system_prompt + rendered[system_end:]
-    # This empty reasoning block mirrors Qwen3 text-generation convention and
-    # makes the model continue directly with the requested answer.
-    return rendered + "<think>\n\n</think>\n\n"
+    return KREA2_ADAPTER.render_generation_prompt(
+        engine,
+        idea,
+        instruction,
+        system_prompt,
+        validate_system_prompt=_validate_system_prompt,
+    )
 
 
 def _refinement_user_message(existing_prompt: str, instruction: str) -> str:
@@ -819,72 +878,15 @@ def _normalize_prompt_versions(versions) -> list[str]:
 
 
 def _decode_generated_text(tokenizer, generated_ids) -> str:
-    text = tokenizer.decode(generated_ids, skip_special_tokens=False)
-    special_tokens = {
-        str(token)
-        for token in (getattr(tokenizer, "all_special_tokens", []) or [])
-        if token
-    }
-    special_tokens.update(
-        {
-            "<|endoftext|>",
-            "<|im_start|>",
-            "<|im_end|>",
-        }
-    )
-    for token in sorted(special_tokens, key=len, reverse=True):
-        if re.fullmatch(r"</?(?:think|analysis)\s*>", str(token).strip(), re.I):
-            continue
-        text = text.replace(str(token), "")
-    return text.strip()
+    return KREA2_ADAPTER.decode_generated_text(tokenizer, generated_ids)
 
 
 def _strip_model_thinking(text: str) -> tuple[str, bool]:
-    text = str(text or "")
-    removed = False
-    complete_block = re.compile(
-        r"<(think|analysis)(?:\s[^>]*)?>.*?</\1\s*>",
-        re.IGNORECASE | re.DOTALL,
-    )
-    while True:
-        text, count = complete_block.subn("", text)
-        if not count:
-            break
-        removed = True
-
-    unmatched_open = re.search(
-        r"<(?:think|analysis)(?:\s[^>]*)?>",
-        text,
-        re.IGNORECASE,
-    )
-    if unmatched_open:
-        text = text[: unmatched_open.start()]
-        removed = True
-
-    text, dangling_closes = re.subn(
-        r"</(?:think|analysis)\s*>",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-    return text.strip(), removed or bool(dangling_closes)
+    return KREA2_ADAPTER.strip_model_thinking(text)
 
 
 def _repetition_loop_suffix(token_ids: list[int]) -> tuple[int, int] | None:
-    token_count = len(token_ids)
-    max_block_size = min(128, token_count // 2)
-    for block_size in range(max_block_size, 7, -1):
-        repeat_count = 2 if block_size >= 32 else 3
-        repeated_size = block_size * repeat_count
-        if token_count < repeated_size:
-            continue
-        block = token_ids[-block_size:]
-        if all(
-            token_ids[-(index + 1) * block_size : -index * block_size or None] == block
-            for index in range(1, repeat_count)
-        ):
-            return block_size, repeat_count
-    return None
+    return KREA2_ADAPTER.repetition_loop_suffix(token_ids)
 
 
 def _latest_gallery_image(gallery):
@@ -1007,14 +1009,19 @@ def _parse_forgy_response(
 ) -> tuple[str, str, bool]:
     raw_response = _strip_forgy_fence(raw_response)
     current_prompt = str(current_prompt or "")
-    reply_index = raw_response.find(FORGY_REPLY_MARKER)
-    prompt_index = raw_response.find(FORGY_PROMPT_MARKER)
-    if reply_index < 0 or prompt_index <= reply_index:
+    reply_match = re.search(r"(?im)^[ \t]*FORGY(?:[ _-]+)REPLY[ \t]*:", raw_response)
+    prompt_match = re.search(
+        r"(?im)^[ \t]*UPDATED(?:[ _-]+)PROMPT[ \t]*:", raw_response
+    )
+    if (
+        reply_match is None
+        or prompt_match is None
+        or prompt_match.start() <= reply_match.start()
+    ):
         return raw_response, current_prompt, False
 
-    reply_start = reply_index + len(FORGY_REPLY_MARKER)
-    reply = raw_response[reply_start:prompt_index].strip()
-    candidate = raw_response[prompt_index + len(FORGY_PROMPT_MARKER) :].strip()
+    reply = raw_response[reply_match.end() : prompt_match.start()].strip()
+    candidate = raw_response[prompt_match.end() :].strip()
     candidate = _strip_forgy_fence(candidate)
     if not reply:
         reply = "I updated the working prompt."
@@ -1093,19 +1100,12 @@ def _prepare_uploaded_image(
 def _render_image_generation_prompt(
     engine, instruction: str, system_prompt: str
 ) -> str:
-    vision_block = getattr(engine, "vision_block", None)
-    if not isinstance(vision_block, str) or not vision_block:
-        raise PromptAssistantError("The active image chat template is unavailable.")
-    instruction = (
-        instruction.strip()
-        if isinstance(instruction, str) and instruction.strip()
-        else DEFAULT_IMAGE_REQUEST
-    )
-    return _render_generation_prompt(
+    return KREA2_ADAPTER.render_image_generation_prompt(
         engine,
-        f"{vision_block}\n{instruction}",
-        "",
+        instruction,
         system_prompt,
+        default_image_request=DEFAULT_IMAGE_REQUEST,
+        validate_system_prompt=_validate_system_prompt,
     )
 
 
@@ -1340,7 +1340,8 @@ def _sample_token(
 
 
 @torch.inference_mode()
-def _generate_with_active_krea(
+def _generate_with_active_text_adapter(
+    model_context: ModelContext,
     idea: str,
     instruction: str,
     system_prompt: str,
@@ -1354,6 +1355,7 @@ def _generate_with_active_krea(
     repetition_penalty: float,
     seed: int,
     generation_id: str,
+    workflow: Workflow = Workflow.IDEA_TO_PROMPT,
 ) -> tuple[str, int, int, str, int, int, int, int, int, bool, int]:
     if not isinstance(idea, str) or not idea.strip():
         raise PromptAssistantError("Please enter an idea first.")
@@ -1373,9 +1375,19 @@ def _generate_with_active_krea(
     repetition_penalty = min(max(float(repetition_penalty), 0.1), 5.0)
     seed = int(seed) % (2**63 - 1)
 
-    _, clip, encoder, tokenizer, engine = _active_krea_components()
-    rendered_prompt = _render_generation_prompt(
-        engine, idea, instruction, system_prompt
+    components = model_context.components
+    adapter = model_context.adapter
+    clip = components.clip
+    encoder = components.encoder
+    tokenizer = components.tokenizer
+    engine = components.engine
+    rendered_prompt = adapter.render_generation_prompt(
+        engine,
+        idea,
+        instruction,
+        system_prompt,
+        workflow=workflow,
+        validate_system_prompt=_validate_system_prompt,
     )
     core_model = getattr(encoder, "model", None)
     embedding = getattr(core_model, "embed_tokens", None)
@@ -1406,7 +1418,7 @@ def _generate_with_active_krea(
 
     kv_bytes_per_token = _kv_cache_bytes(config, batch=1, capacity=1, dtype=dtype)
     kv_cache_bytes = kv_bytes_per_token * capacity
-    # This targets the exact patcher already owned by KREA2 and tells Forge how
+    # This targets the exact patcher already owned by the active adapter and tells Forge how
     # much additional room the temporary cache needs before weights are placed.
     memory_management.load_models_gpu(
         [clip.patcher], memory_required=int(kv_cache_bytes * 1.10)
@@ -1453,7 +1465,7 @@ def _generate_with_active_krea(
         int(token_id)
         for token_id in (
             getattr(tokenizer, "eos_token_id", None),
-            151645,  # <|im_end|> in the KREA2 Qwen tokenizer
+            151645,  # <|im_end|> in the supported Qwen tokenizers
         )
         if token_id is not None
     }
@@ -1495,7 +1507,7 @@ def _generate_with_active_krea(
         if token_id in stop_tokens:
             finish_reason = "eos"
             break
-        repetition_loop = _repetition_loop_suffix(generated_ids)
+        repetition_loop = adapter.repetition_loop_suffix(generated_ids)
         if repetition_loop is not None:
             block_size, repeat_count = repetition_loop
             del generated_ids[-block_size * (repeat_count - 1) :]
@@ -1503,7 +1515,7 @@ def _generate_with_active_krea(
             break
         embeds = embedding(next_token).to(dtype=dtype)
 
-    generated_text = _decode_generated_text(tokenizer, generated_ids)
+    generated_text = adapter.decode_generated_text(tokenizer, generated_ids)
     if not generated_text:
         if finish_reason == "cancelled":
             raise GenerationCancelled("Generation cancelled by user.")
@@ -1523,6 +1535,15 @@ def _generate_with_active_krea(
         vram_limited,
         seed,
     )
+
+
+def _generate_with_active_krea(**kwargs):
+    """Compatibility wrapper for the former KREA2-specific text entry point."""
+
+    model_context = _active_model_context()
+    if model_context.identity.adapter_id != KREA2_ADAPTER.adapter_id:
+        raise PromptAssistantError("The active model stack is not KREA2.")
+    return _generate_with_active_text_adapter(model_context=model_context, **kwargs)
 
 
 @torch.inference_mode()
@@ -1767,6 +1788,13 @@ def _generate_with_active_krea_image(
     )
 
 
+KREA2_ADAPTER.bind_runtime(
+    text_generator=_generate_with_active_text_adapter,
+    image_generator=_generate_with_active_krea_image,
+)
+ZIMAGE_ADAPTER.bind_runtime(text_generator=_generate_with_active_text_adapter)
+
+
 def _run_generation(
     idea,
     instruction,
@@ -1782,9 +1810,12 @@ def _run_generation(
     repetition_penalty,
     seed,
     generation_id,
+    workflow=Workflow.IDEA_TO_PROMPT,
 ):
     started = time.perf_counter()
     try:
+        model_context = _active_model_context()
+        _require_workflow(model_context, workflow)
         (
             text,
             input_count,
@@ -1797,7 +1828,8 @@ def _run_generation(
             available_output_tokens,
             vram_limited,
             used_seed,
-        ) = _generate_with_active_krea(
+        ) = model_context.adapter.generate_text(
+            model_context=model_context,
             idea=idea,
             instruction=instruction,
             system_prompt=system_prompt,
@@ -1811,11 +1843,12 @@ def _run_generation(
             repetition_penalty=repetition_penalty,
             seed=seed,
             generation_id=generation_id,
+            workflow=workflow,
         )
     except GenerationCancelled:
         LOGGER.info("Prompt generation cancelled by user")
         return "", "**Cancelled by user.**"
-    except PromptAssistantError as exc:
+    except (PromptAssistantError, AdapterError) as exc:
         LOGGER.warning("Prompt generation rejected: %s", exc)
         return "", f"**Not executed:** {exc}"
     except torch.OutOfMemoryError:
@@ -1830,7 +1863,7 @@ def _run_generation(
     finally:
         _clear_generation_request(generation_id)
 
-    text, thinking_hidden = _strip_model_thinking(text)
+    text, thinking_hidden = model_context.adapter.strip_model_thinking(text)
     if not text:
         return "", (
             "**Not executed:** The active text encoder produced only internal "
@@ -1875,9 +1908,12 @@ def _run_image_generation(
     repetition_penalty,
     seed,
     generation_id,
+    workflow=Workflow.IMAGE_TO_PROMPT,
 ):
     started = time.perf_counter()
     try:
+        model_context = _active_model_context()
+        _require_workflow(model_context, workflow, vision_input=True)
         (
             text,
             input_count,
@@ -1893,7 +1929,7 @@ def _run_image_generation(
             visual_token_count,
             original_size,
             prepared_size,
-        ) = _generate_with_active_krea_image(
+        ) = model_context.adapter.generate_image(
             image=image,
             instruction=instruction,
             system_prompt=system_prompt,
@@ -1911,7 +1947,7 @@ def _run_image_generation(
     except GenerationCancelled:
         LOGGER.info("Image-to-prompt generation cancelled by user")
         return "", "**Cancelled by user.**"
-    except PromptAssistantError as exc:
+    except (PromptAssistantError, AdapterError) as exc:
         LOGGER.warning("Image-to-prompt generation rejected: %s", exc)
         return "", f"**Not executed:** {exc}"
     except torch.OutOfMemoryError:
@@ -1999,6 +2035,7 @@ def _run_refinement(
         repetition_penalty,
         seed,
         generation_id,
+        workflow=Workflow.REFINE_PROMPT,
     )
     if not refined_prompt:
         return original_prompt, status
@@ -2067,6 +2104,7 @@ def _run_forgy_turn(
             repetition_penalty,
             seed,
             generation_id,
+            workflow=Workflow.FORGY_CHAT,
         )
         status = status.replace(
             "**Active text encoder**",
@@ -2089,6 +2127,7 @@ def _run_forgy_turn(
             repetition_penalty,
             seed,
             generation_id,
+            workflow=Workflow.FORGY_CHAT,
         )
         status = status.replace(
             "**Active vision encoder**",
@@ -2982,6 +3021,12 @@ def _capture_forge_gallery_component(component, **_kwargs) -> None:
 
 def _on_ui_tabs():
     stack_ready, initial_loader_status = _forge_stack_status()
+    initial_workflow_states = _current_workflow_states()
+    initial_chat_enabled = initial_workflow_states[Workflow.FORGY_CHAT]
+    initial_image_enabled = initial_workflow_states[Workflow.IMAGE_TO_PROMPT]
+    initial_forgy_image_notice, initial_image_workflow_notice = (
+        _image_capability_messages()
+    )
     captured_txt2img_gallery = FORGE_GALLERY_COMPONENTS.get("txt2img_gallery")
     captured_img2img_gallery = FORGE_GALLERY_COMPONENTS.get("img2img_gallery")
 
@@ -3073,7 +3118,10 @@ def _on_ui_tabs():
                         )
                         with gr.Row():
                             forgy_send = gr.Button(
-                                "Send to Forgy", variant="primary", scale=4
+                                "Send to Forgy",
+                                variant="primary",
+                                interactive=initial_chat_enabled,
+                                scale=4,
                             )
                             forgy_stop = gr.Button(
                                 "Stop", variant="stop", interactive=False, scale=1
@@ -3095,11 +3143,8 @@ def _on_ui_tabs():
                             show_copy_button=True,
                         )
                         forgy_prompt_versions = gr.State([])
-                        gr.Markdown(
-                            "**Optional image attachment**  \n"
-                            "The image is included with every message until you clear "
-                            "or replace it. It is processed locally and is not stored "
-                            "by the extension."
+                        forgy_image_capability_notice = gr.Markdown(
+                            initial_forgy_image_notice
                         )
                         forgy_image = gr.Image(
                             label="Image for Forgy",
@@ -3107,8 +3152,12 @@ def _on_ui_tabs():
                             type="pil",
                             image_mode="RGB",
                             height=260,
+                            interactive=initial_chat_enabled and initial_image_enabled,
                         )
-                        forgy_grab_last_image = gr.Button("Grab last generated image")
+                        forgy_grab_last_image = gr.Button(
+                            "Grab last generated image",
+                            interactive=initial_chat_enabled and initial_image_enabled,
+                        )
                         forgy_last_gallery_source = gr.State("")
                         forgy_txt2img_gallery_input = (
                             captured_txt2img_gallery
@@ -3198,7 +3247,12 @@ def _on_ui_tabs():
                     max_lines=8,
                 )
                 with gr.Row():
-                    generate = gr.Button("Generate prompt", variant="primary", scale=4)
+                    generate = gr.Button(
+                        "Generate prompt",
+                        variant="primary",
+                        interactive=initial_workflow_states[Workflow.IDEA_TO_PROMPT],
+                        scale=4,
+                    )
                     stop_generation = gr.Button(
                         "Stop", variant="stop", interactive=False, scale=1
                     )
@@ -3247,11 +3301,7 @@ def _on_ui_tabs():
                 )
                 image_persona_name = image_active_persona_controls[0]
                 image_persona_prompt = image_active_persona_controls[1]
-                gr.Markdown(
-                    "The uploaded image is processed locally and is not stored "
-                    "by the extension. The optional instruction is the complete "
-                    "user request sent alongside the image."
-                )
+                image_capability_notice = gr.Markdown(initial_image_workflow_notice)
                 with gr.Row(
                     equal_height=True,
                     elem_classes=["forge-krea-image-input-row"],
@@ -3263,6 +3313,7 @@ def _on_ui_tabs():
                         image_mode="RGB",
                         height=380,
                         scale=1,
+                        interactive=initial_image_enabled,
                     )
                     image_instruction = gr.Textbox(
                         label=(
@@ -3277,7 +3328,10 @@ def _on_ui_tabs():
                     )
                 with gr.Row():
                     image_generate = gr.Button(
-                        "Generate prompt from image", variant="primary", scale=4
+                        "Generate prompt from image",
+                        variant="primary",
+                        interactive=initial_image_enabled,
+                        scale=4,
                     )
                     image_stop_generation = gr.Button(
                         "Stop", variant="stop", interactive=False, scale=1
@@ -3368,7 +3422,10 @@ def _on_ui_tabs():
                 )
                 with gr.Row():
                     refine_generate = gr.Button(
-                        "Refine this prompt", variant="primary", scale=4
+                        "Refine this prompt",
+                        variant="primary",
+                        interactive=initial_workflow_states[Workflow.REFINE_PROMPT],
+                        scale=4,
                     )
                     refine_stop_generation = gr.Button(
                         "Stop", variant="stop", interactive=False, scale=1
@@ -3432,7 +3489,24 @@ def _on_ui_tabs():
             outputs=[loader_status],
             show_progress="minimal",
         )
-        model_load_event.then(
+        capability_refresh_event = model_load_event.then(
+            fn=_model_capability_updates,
+            inputs=[],
+            outputs=[
+                generate,
+                image_generate,
+                refine_generate,
+                forgy_send,
+                source_image,
+                forgy_image,
+                forgy_grab_last_image,
+                forgy_image_capability_notice,
+                image_capability_notice,
+            ],
+            queue=False,
+            show_progress="hidden",
+        )
+        capability_refresh_event.then(
             fn=_finish_model_loading,
             inputs=[],
             outputs=[load_forge_stack],

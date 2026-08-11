@@ -7,14 +7,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping improve the beta. Do not post vulnerabilities, secrets, private prompts/personas, generated images, or unredacted personal paths here.
+        Thank you for helping improve this prerelease. Do not post vulnerabilities, secrets, private prompts/personas, generated images, or unredacted personal paths here.
 
   - type: input
     id: extension-version
     attributes:
       label: Extension version
       description: Use the version shown in the extension UI or GitHub release.
-      placeholder: v0.5.0-beta.1
+      placeholder: v0.5.1-alpha.1
     validations:
       required: true
 

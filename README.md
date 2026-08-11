@@ -1,8 +1,8 @@
 # Forgy — Forge Neo Prompt Studio
 
-**Beta 0.5.0-beta.1**
+**Alpha 0.5.1-alpha.1 (development prerelease)**
 
-[![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
+[![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=develop)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
 A Forge Neo extension that turns a short image idea or an uploaded reference
 image into a polished image-generation prompt and can iteratively refine an
@@ -11,9 +11,10 @@ or uploaded image while maintaining a visible working prompt. The extension
 reuses the text and vision encoder already owned by Forge. It does not download
 or load a second language model.
 
-This first beta establishes the prompt-studio workflow with Forgy Chat,
-Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement. It has not yet been
-tested across a broad range of GPUs and Forge Neo configurations.
+This development alpha adds an explicit modular adapter architecture and the
+initial text-only Z-Image Base/Turbo adapter to the established Forgy Chat,
+Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement workflows. It has not yet
+been tested across a broad range of GPUs and Forge Neo configurations.
 
 ## Welcome
 
@@ -44,18 +45,24 @@ user data to Codex. This project is not affiliated with or endorsed by OpenAI.
 
 Development and initial testing target Forge Neo 2.28.
 
-The first adapter supports the KREA2 model family with its Qwen3-VL 4B text and
-vision encoder and a compatible VAE. Future model families are intended to use
-separate adapters while sharing the studio's neutral workflows, personas, and
-controls.
+The KREA2 adapter supports its Qwen3-VL 4B text/vision encoder and a compatible
+VAE across all four workflows. The initial Z-Image Base/Turbo adapter reuses
+Forge's active Qwen3-4B encoder for Forgy Chat, Idea-to-Prompt, and Refine;
+Z-Image has no vision input, so Image-to-Prompt and Forgy image attachment are
+disabled. Model detection, typed capabilities, request-local component
+resolution, and family prompt behavior live behind explicit adapter contracts.
+Unsupported stacks fail closed, and model-dependent workflow and image controls
+refresh after Forge loads the current selection. See
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for the extension contract.
 
 ## Installation
 
-Clone or copy this repository into the Forge Neo `extensions` directory:
+Clone this exact development prerelease into the Forge Neo `extensions`
+directory:
 
 ```powershell
 cd sd-webui-forge-neo/extensions
-git clone https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio.git
+git clone --branch v0.5.1-alpha.1 https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio.git
 ```
 
 ```text
@@ -143,7 +150,8 @@ lists, scan model directories, download files, or instantiate weights itself.
 Forge remains responsible for architecture detection, component assembly,
 offloading, and memory management. The extension accepts the result only when
 the selected adapter can resolve the active model, encoder, tokenizer, and
-ModelPatcher. The current beta includes the KREA2/Qwen3-VL adapter.
+ModelPatcher. The current development branch includes KREA2/Qwen3-VL and the
+initial text-only Z-Image Base/Turbo adapter.
 
 Loading stays explicit so opening the assistant cannot unexpectedly allocate
 VRAM or unload another active model.
@@ -155,8 +163,11 @@ the idea and its optional additional instruction form the user message. In
 `Image to prompt`, the uploaded image and the optional instruction form the user
 request. When the image instruction is empty, the UI uses the visible default
 request shown in its placeholder. In `Refine prompt`, the current prompt and the
-required refinement instruction form the user message. The extension adds no
-hidden style or content instruction.
+  required refinement instruction form the user message. The extension adds no
+  hidden style persona or model-content policy. A family adapter may append a
+  documented, task-only workflow contract to the user request when its encoder
+  needs clearer output boundaries; the initial Z-Image contracts are described
+  in `ARCHITECTURE.md`.
 
 `Default` provides the original natural-language prompt-writing behavior. It
 can be edited but not deleted. The built-in `Ghost` persona has an
@@ -330,19 +341,21 @@ framework determinism.
 
 ## Current limitations
 
-- one model-family adapter in this beta: KREA2 with Qwen3-VL;
+- this development alpha contains KREA2 and the initial text-only Z-Image
+  Base/Turbo adapter, but Z-Image Turbo still needs a separate live text smoke;
 - one uploaded image per image-to-prompt request;
 - image upload generates text only and does not configure img2img or
   reference-image conditioning;
-- no Z-Image backend yet;
+- Z-Image has no Image-to-Prompt or Forgy image analysis; its first adapter is
+  text-only and still needs broader live prompt-quality testing;
 - no persistent local generation history; Forgy keeps only bounded session undo versions;
 - Forgy never starts a Forge image generation autonomously; the user must click
   an explicit `replace + generate` or `append + generate` action;
 - no dedicated Pony, Illustrious, or NoobAI tag-prompt adapters.
 
 Future experiments are tracked in the project [roadmap](ROADMAP.md). The next
-areas being considered are local prompt history, privacy-conscious diagnostic
-reports, and a separate Z-Image adapter.
+areas being considered include model-family default personas, broader Z-Image
+validation, local prompt history, and privacy-conscious diagnostic reports.
 
 ## Feedback and security
 
