@@ -42,6 +42,8 @@ def public_constants(source: str) -> dict[str, object]:
         "DEFAULT_IMAGE_PERSONA_PROMPT",
         "DEFAULT_REFINEMENT_PERSONA_PROMPT",
         "DEFAULT_AGENT_PERSONA_PROMPT",
+        "DEFAULT_AGENT_LEGACY_PERSONA_NAME",
+        "DEFAULT_AGENT_LEGACY_PERSONA_PROMPT",
         "FORGY_MAX_OUTPUT_TOKENS",
         "VRAM_PROFILES",
     }
@@ -108,6 +110,8 @@ class PublicMetadataTests(unittest.TestCase):
                 "DEFAULT_IMAGE_PERSONA_PROMPT",
                 "DEFAULT_REFINEMENT_PERSONA_PROMPT",
                 "DEFAULT_AGENT_PERSONA_PROMPT",
+                "DEFAULT_AGENT_LEGACY_PERSONA_NAME",
+                "DEFAULT_AGENT_LEGACY_PERSONA_PROMPT",
                 "FORGY_MAX_OUTPUT_TOKENS",
                 "VRAM_PROFILES",
             },
@@ -118,9 +122,9 @@ class PublicMetadataTests(unittest.TestCase):
             self.constants["EXTENSION_NAME"],
             "Forgy — Forge Neo Prompt Studio",
         )
-        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.1-alpha.1")
+        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.2-alpha.1")
         self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
-        self.assertIn("**Alpha 0.5.1-alpha.1 (development prerelease)**", self.readme)
+        self.assertIn("**Alpha 0.5.2-alpha.1 (development prerelease)**", self.readme)
         self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
         self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
         self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))
@@ -197,6 +201,19 @@ class PublicMetadataTests(unittest.TestCase):
             self.agent_personas["personas"]["Default"],
             self.constants["DEFAULT_AGENT_PERSONA_PROMPT"],
         )
+        legacy_name = self.constants["DEFAULT_AGENT_LEGACY_PERSONA_NAME"]
+        self.assertEqual(legacy_name, "Default Legacy")
+        self.assertEqual(
+            self.agent_personas["personas"][legacy_name],
+            self.constants["DEFAULT_AGENT_LEGACY_PERSONA_PROMPT"],
+        )
+        legacy_hash = hashlib.sha256(
+            self.constants["DEFAULT_AGENT_LEGACY_PERSONA_PROMPT"].encode("utf-8")
+        ).hexdigest()
+        self.assertIn(
+            f'"{legacy_hash}": DEFAULT_AGENT_PERSONA_PROMPT',
+            self.source,
+        )
 
     def test_unchanged_legacy_defaults_migrate_without_touching_custom_personas(
         self,
@@ -215,6 +232,9 @@ class PublicMetadataTests(unittest.TestCase):
             "PERSONAS_PATH": Path("unused-personas.json"),
             "DEFAULT_PERSONA_PROMPT": neutral_default,
             "LEGACY_DEFAULT_PROMPT_MIGRATIONS": {legacy_hash: neutral_default},
+            "BUILTIN_PERSONA_BACKUPS": {
+                neutral_default: {"Default Legacy": legacy_default}
+            },
             "PERSONA_LOCK": threading.RLock(),
             "PromptAssistantError": error_type,
             "LOGGER": SimpleNamespace(info=lambda *args, **kwargs: None),
@@ -250,6 +270,7 @@ class PublicMetadataTests(unittest.TestCase):
             persisted = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertEqual(migrated["personas"]["Default"], neutral_default)
+        self.assertEqual(migrated["personas"]["Default Legacy"], legacy_default)
         self.assertEqual(migrated["personas"]["User style"], "Keep this custom prompt.")
         self.assertEqual(persisted, migrated)
 
@@ -959,6 +980,83 @@ class PublicMetadataTests(unittest.TestCase):
             ["second", "third"],
         )
 
+    def test_forgy_clear_prompt_is_undoable_and_leaves_chat_state_alone(self) -> None:
+        clear_prompt = isolated_function(
+            self.source,
+            "_clear_forgy_prompt",
+            {
+                "_normalize_prompt_versions": lambda values: list(values or []),
+                "FORGY_MAX_PROMPT_VERSIONS": 2,
+            },
+        )
+
+        cleared, versions, status = clear_prompt(" Current prompt ", ["older"])
+
+        self.assertEqual(cleared, "")
+        self.assertEqual(versions, ["older", "Current prompt"])
+        self.assertIn("Cleared", status)
+        empty, unchanged_versions, status = clear_prompt("", versions)
+        self.assertEqual(empty, "")
+        self.assertEqual(unchanged_versions, versions)
+        self.assertIn("already empty", status)
+
+    def test_forgy_can_restore_the_prompt_recorded_with_the_latest_gallery(
+        self,
+    ) -> None:
+        skip_marker = object()
+        namespace = {
+            "gr": SimpleNamespace(skip=lambda: skip_marker),
+            "_normalize_prompt_versions": lambda values: list(values or []),
+        }
+        load_prompt = isolated_function(
+            self.source,
+            "_load_prompt_for_forgy",
+            {
+                **namespace,
+                "FORGY_MAX_PROMPT_VERSIONS": 3,
+            },
+        )
+        namespace.update(
+            {
+                "_load_prompt_for_forgy": load_prompt,
+                "_latest_gallery_image": lambda gallery: object() if gallery else None,
+            }
+        )
+        grab_prompt = isolated_function(
+            self.source,
+            "_grab_last_forge_prompt",
+            namespace,
+        )
+
+        prompt, versions, status = grab_prompt(
+            "img2img",
+            "Recorded generation prompt",
+            [],
+            ["gallery image"],
+            "Current txt2img field",
+            "Edited after generation",
+            "Forgy working prompt",
+            [],
+        )
+
+        self.assertEqual(prompt, "Recorded generation prompt")
+        self.assertEqual(versions, ["Forgy working prompt"])
+        self.assertIn("latest img2img generation", status)
+
+        missing, versions, status = grab_prompt(
+            "",
+            None,
+            [],
+            [],
+            "A prompt without a gallery",
+            "",
+            "Forgy working prompt",
+            [],
+        )
+        self.assertIs(missing, skip_marker)
+        self.assertEqual(versions, [])
+        self.assertIn("Generate an image", status)
+
     def test_forgy_ui_and_session_controls_are_present(self) -> None:
         forgy_start = self.source.index('with gr.Tab("Forgy Chat"):')
         idea_start = self.source.index('with gr.Tab("Idea to prompt"):')
@@ -984,6 +1082,10 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIn("max_output_cap=FORGY_MAX_OUTPUT_TOKENS", self.source)
         self.assertIn("agent_active_persona_controls", forgy_block)
         self.assertIn('label="Forgy\'s prompt output and working input"', forgy_block)
+        self.assertIn("forgy_clear_prompt = gr.Button(", forgy_block)
+        self.assertIn('"Grab last generated prompt"', forgy_block)
+        self.assertIn("TRANSIENT_ACTION_RESET_SECONDS", forgy_block)
+        self.assertIn("QUICK_ACTION_RESET_SECONDS", forgy_block)
         self.assertIn("Paste an existing prompt here", forgy_block)
         self.assertNotIn('gr.Accordion("Optional image attachment"', forgy_block)
         self.assertLess(
@@ -999,6 +1101,12 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIn("**Prompt history location:**", forgy_block)
         self.assertIn("not written to a local file", forgy_block)
         self.assertIn("_refresh_active_agent_persona", self.source)
+        self.assertIn("_grab_last_forge_prompt", self.source)
+        self.assertIn("_finish_transient_action_button", self.source)
+        self.assertIn("forgy_grab_image_reset_timer.tick(", self.source)
+        self.assertIn("forgy_grab_prompt_reset_timer.tick(", self.source)
+        self.assertIn("forgy_undo_reset_timer.tick(", self.source)
+        self.assertIn("forgy_clear_chat_reset_timer.tick(", self.source)
         self.assertGreaterEqual(
             self.source.count('finish_reason = "repetition_stop"'), 2
         )
@@ -1014,6 +1122,20 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIn("setTimeout(scrollToBottom, 600)", scroll_js)
         self.assertIn("forgy_chat.change(", self.source)
         self.assertIn("elem_id=FORGY_CHAT_ELEMENT_ID", self.source)
+
+    def test_forgy_attachment_has_a_click_to_close_lightbox(self) -> None:
+        build_js = isolated_function(self.source, "_forgy_image_lightbox_js", {})
+        lightbox_js = build_js("forgy_image", "clear_prompt")
+
+        self.assertIn('querySelector("#forgy_image")', lightbox_js)
+        self.assertIn('querySelector("#clear_prompt")', lightbox_js)
+        self.assertIn('setAttribute("role", "dialog")', lightbox_js)
+        self.assertIn('setAttribute("aria-modal", "true")', lightbox_js)
+        self.assertIn("overlayEvent.target === enlarged", lightbox_js)
+        self.assertIn('keyEvent.key === "Escape"', lightbox_js)
+        self.assertIn("tab.load(", self.source)
+        self.assertIn("js=_forgy_image_lightbox_js(", self.source)
+        self.assertIn("elem_id=FORGY_IMAGE_ELEMENT_ID", self.source)
 
     def test_workflow_defaults_are_isolated_from_forge_ui_config_collisions(
         self,
@@ -1083,6 +1205,32 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIs(blocked, skip_marker)
         self.assertIn("temp", status)
 
+    def test_forgy_records_the_prompt_when_a_gallery_updates(self) -> None:
+        skip_marker = object()
+        remember = isolated_function(
+            self.source,
+            "_remember_forge_generation",
+            {
+                "_latest_gallery_image": lambda gallery: object() if gallery else None,
+                "gr": SimpleNamespace(skip=lambda: skip_marker),
+            },
+        )
+
+        source, prompt = remember(
+            ["new gallery image"],
+            "Prompt used for generation",
+            source_name="txt2img",
+        )
+        self.assertEqual(source, "txt2img")
+        self.assertEqual(prompt, "Prompt used for generation")
+        missing_source, missing_prompt = remember(
+            [],
+            "Prompt without a gallery update",
+            source_name="img2img",
+        )
+        self.assertIs(missing_source, skip_marker)
+        self.assertIs(missing_prompt, skip_marker)
+
     def test_forgy_creates_the_configured_forge_temp_directory(self) -> None:
         logger = SimpleNamespace(exception=lambda *args, **kwargs: None)
         with TemporaryDirectory() as root:
@@ -1107,6 +1255,15 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIn(".forge-krea-persona-dropdown ul.options", self.style)
         self.assertIn("overflow-y: scroll", self.style)
         self.assertIn("scrollbar-gutter: stable", self.style)
+
+    def test_forgy_prompt_clear_button_and_image_lightbox_are_styled(self) -> None:
+        self.assertIn("#forge_krea_clear_working_prompt", self.style)
+        self.assertIn("right: 0.55rem", self.style)
+        self.assertIn(".forge-krea-working-prompt textarea", self.style)
+        self.assertIn("#forge_krea_forgy_image img", self.style)
+        self.assertIn(".forge-krea-image-lightbox", self.style)
+        self.assertIn("cursor: zoom-in", self.style)
+        self.assertIn("cursor: zoom-out", self.style)
 
     def test_requested_roadmap_areas_are_recorded(self) -> None:
         for heading in (

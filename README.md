@@ -1,6 +1,6 @@
 # Forgy — Forge Neo Prompt Studio
 
-**Alpha 0.5.1-alpha.1 (development prerelease)**
+**Alpha 0.5.2-alpha.1 (development prerelease)**
 
 [![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=develop)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
@@ -11,10 +11,11 @@ or uploaded image while maintaining a visible working prompt. The extension
 reuses the text and vision encoder already owned by Forge. It does not download
 or load a second language model.
 
-This development alpha adds an explicit modular adapter architecture and the
-initial text-only Z-Image Base/Turbo adapter to the established Forgy Chat,
-Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement workflows. It has not yet
-been tested across a broad range of GPUs and Forge Neo configurations.
+This development alpha adds an explicit modular adapter architecture and
+text-only Z-Image Base/Turbo and FLUX.2 Klein 4B adapters to the established
+Forgy Chat, Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement workflows. It
+has not yet been tested across a broad range of GPUs and Forge Neo
+configurations.
 
 ## Welcome
 
@@ -49,10 +50,14 @@ The KREA2 adapter supports its Qwen3-VL 4B text/vision encoder and a compatible
 VAE across all four workflows. The initial Z-Image Base/Turbo adapter reuses
 Forge's active Qwen3-4B encoder for Forgy Chat, Idea-to-Prompt, and Refine;
 Z-Image has no vision input, so Image-to-Prompt and Forgy image attachment are
-disabled. Model detection, typed capabilities, request-local component
-resolution, and family prompt behavior live behind explicit adapter contracts.
-Unsupported stacks fail closed, and model-dependent workflow and image controls
-refresh after Forge loads the current selection. See
+disabled. The FLUX.2 Klein adapter provides the same three text workflows for
+Klein 4B and Base 4B through Forge's tied Qwen3-4B encoder. Klein reference
+images remain Forge generation inputs rather than Forgy vision inputs. Klein
+9B is rejected because Forge does not retain the separate untied Qwen3-8B LM
+head needed for text generation. Model detection, typed capabilities,
+request-local component resolution, and family prompt behavior live behind
+explicit adapter contracts. Unsupported stacks fail closed, and model-dependent
+workflow and image controls refresh after Forge loads the current selection. See
 [`ARCHITECTURE.md`](ARCHITECTURE.md) for the extension contract.
 
 ## Installation
@@ -62,7 +67,7 @@ directory:
 
 ```powershell
 cd sd-webui-forge-neo/extensions
-git clone --branch v0.5.1-alpha.1 https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio.git
+git clone --branch v0.5.2-alpha.1 https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio.git
 ```
 
 ```text
@@ -150,8 +155,8 @@ lists, scan model directories, download files, or instantiate weights itself.
 Forge remains responsible for architecture detection, component assembly,
 offloading, and memory management. The extension accepts the result only when
 the selected adapter can resolve the active model, encoder, tokenizer, and
-ModelPatcher. The current development branch includes KREA2/Qwen3-VL and the
-initial text-only Z-Image Base/Turbo adapter.
+ModelPatcher. The current development branch includes KREA2/Qwen3-VL and
+text-only Z-Image Base/Turbo and FLUX.2 Klein 4B adapters.
 
 Loading stays explicit so opening the assistant cannot unexpectedly allocate
 VRAM or unload another active model.
@@ -166,15 +171,19 @@ request shown in its placeholder. In `Refine prompt`, the current prompt and the
   required refinement instruction form the user message. The extension adds no
   hidden style persona or model-content policy. A family adapter may append a
   documented, task-only workflow contract to the user request when its encoder
-  needs clearer output boundaries; the initial Z-Image contracts are described
-  in `ARCHITECTURE.md`.
+  needs clearer output boundaries; the Z-Image and FLUX.2 Klein contracts are
+  described in `ARCHITECTURE.md`.
 
-`Default` provides the original natural-language prompt-writing behavior. It
-can be edited but not deleted. The built-in `Ghost` persona has an
-intentionally empty system prompt for direct, unguided encoder experiments and
-cannot be edited into a non-empty persona or deleted. Other personas still
-require a non-empty system prompt. Users can create, edit, and delete additional
-personas in the UI.
+The focused Idea-to-Prompt, Image-to-Prompt, and Refine stores keep their
+workflow-specific `Default` prompts. Forgy Chat's `Default` combines idea
+expansion, image analysis, and prompt refinement in one interactive persona. Its
+former built-in prompt remains available as `Default Legacy`. An unchanged old
+Forgy default migrates by exact known hash; edited defaults and custom personas
+are preserved. `Default` can be edited but not deleted. The built-in `Ghost`
+persona has an intentionally empty system prompt for direct, unguided encoder
+experiments and cannot be edited into a non-empty persona or deleted. Other
+personas still require a non-empty system prompt. Users can create, edit, and
+delete additional personas in the UI.
 
 Idea personas are stored locally in `personas.json`; image personas use
 `image_personas.json`; refinement personas use `refinement_personas.json`; Forgy
@@ -194,7 +203,7 @@ The files are written atomically. Personal persona data is excluded from Git by
 default. `personas.example.json`, `image_personas.example.json`,
 `refinement_personas.example.json`, and `agent_personas.example.json` contain the
 four distributable defaults. When a local file does not exist, its built-in
-Default persona is used automatically.
+Default persona and any built-in backup are used automatically.
 
 ## Image to prompt
 
@@ -237,7 +246,16 @@ is unavailable, Forgy falls back to the other non-empty gallery. The image is
 copied into Forgy's normal local attachment field only after the explicit
 button click. Before Gradio post-processes that copy, the extension ensures
 Forge's configured temporary-image directory exists; it does not introduce a
-separate storage location.
+separate storage location. Clicking an uploaded or grabbed Forgy image opens a
+large local lightbox; clicking the enlarged image or backdrop closes it again.
+
+`Grab last generated prompt` records the positive prompt when a txt2img or
+img2img gallery receives its latest image and explicitly loads that exact prompt
+into Forgy's working field. If no recorded generation is available, it falls
+back only to a non-empty prompt belonging to an available gallery. The small
+`×` below the working field's copy control clears only that prompt and adds the
+previous value to Undo. Successful grab labels reset after two seconds;
+successful Undo and conversation-clear labels reset after one second.
 
 The built-in Forgy persona asks the model to return a concise conversational
 reply and either a complete updated prompt or the visible `[UNCHANGED]` marker.
@@ -246,12 +264,12 @@ shown but the working prompt is preserved. Users can edit the complete Forgy
 system prompt in the persona controls; keeping its visible output markers is
 required for automatic prompt updates.
 
-Forgy is deliberately bounded for the currently supported Qwen3-VL 4B encoder,
-which is primarily a diffusion text/vision encoder rather than a full-size chat
-model. Forgy appends Qwen's `/no_think` directive, allows up to 4096 output
-tokens for long iterative prompt sessions, and defaults to a 1.15 repetition
-penalty. Input and output still share the selected VRAM-aware context window, so
-the effective output limit can be lower after the persona, conversation, current
+Forgy is deliberately bounded for the currently supported diffusion-owned Qwen
+encoders, which are not replacements for a dedicated full-size chat model.
+Forgy uses each validated family template, allows up to 4096 output tokens for
+long iterative prompt sessions, and defaults to a 1.15 repetition penalty.
+Input and output still share the selected VRAM-aware context window, so the
+effective output limit can be lower after the persona, conversation, current
 prompt, and optional image tokens are counted. If an exact token sequence starts
 looping, generation stops early with the finish reason
 `repetition_stop` and the duplicate tail is discarded. Any `<think>` or
@@ -264,8 +282,9 @@ The raw reply remains visible, but Forgy's automatic working-prompt update will
 normally preserve the current prompt because the expected response markers may
 be absent.
 
-Prompt changes are kept in a bounded, session-only version list so `Undo prompt
-change` can restore the previous prompt. `Clear conversation` removes chat
+Prompt changes — including the small prompt-clear action and an explicit prompt
+grab — are kept in a bounded, session-only version list so `Undo prompt change`
+can restore the previous prompt. `Clear conversation` removes chat
 messages but deliberately preserves the current prompt and its versions. Chat
 messages, prompt versions, and uploaded images are not written to extension
 storage. The Forgy Chat UI states this location explicitly: up to 50 previous
@@ -294,8 +313,8 @@ automatically. A smaller manual fallback is available under `Sampling`.
 | 24 GB | 8192 tokens | about 1152 MiB |
 | 32 GB | 12288 tokens | about 1728 MiB |
 
-\* For the currently supported Qwen3-VL 4B adapter with an FP16/BF16
-KV cache. Runtime allocation uses the active encoder configuration and dtype.
+\* For the currently supported 2560-wide Qwen3 4B adapters with an FP16/BF16 KV
+cache. Runtime allocation uses the active encoder configuration and dtype.
 
 Input and output share one window:
 
@@ -341,13 +360,19 @@ framework determinism.
 
 ## Current limitations
 
-- this development alpha contains KREA2 and the initial text-only Z-Image
-  Base/Turbo adapter, but Z-Image Turbo still needs a separate live text smoke;
+- this development alpha contains KREA2 and text-only Z-Image Base/Turbo and
+  FLUX.2 Klein 4B adapters; Z-Image Turbo still needs a separate live text
+  smoke, while Klein 4B has one bounded real-model text smoke but needs broader
+  prompt-quality and workflow testing;
 - one uploaded image per image-to-prompt request;
 - image upload generates text only and does not configure img2img or
   reference-image conditioning;
 - Z-Image has no Image-to-Prompt or Forgy image analysis; its first adapter is
   text-only and still needs broader live prompt-quality testing;
+- FLUX.2 Klein 4B is text-only inside Forgy; Klein reference images remain
+  native Forge generation inputs, normal Klein image generation still needs a
+  recorded smoke, and Klein 9B is not supported without its discarded untied
+  LM head;
 - no persistent local generation history; Forgy keeps only bounded session undo versions;
 - Forgy never starts a Forge image generation autonomously; the user must click
   an explicit `replace + generate` or `append + generate` action;
@@ -355,7 +380,8 @@ framework determinism.
 
 Future experiments are tracked in the project [roadmap](ROADMAP.md). The next
 areas being considered include model-family default personas, broader Z-Image
-validation, local prompt history, and privacy-conscious diagnostic reports.
+and FLUX.2 Klein validation, local prompt history, and privacy-conscious
+diagnostic reports.
 
 ## Feedback and security
 

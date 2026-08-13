@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.2-alpha.1 - 2026-08-13
+
+- Added an isolated text-only FLUX.2 Klein 4B/Base 4B adapter using Forge's
+  active tied Qwen3-4B encoder, tokenizer, and `ModelPatcher` for Forgy Chat,
+  Idea-to-Prompt, and Refine.
+- Added Klein-specific stack validation and workflow contracts without changing
+  the released Z-Image adapter or shared personas.
+- Made Klein 9B fail closed with an explicit explanation because Forge discards
+  its separate untied Qwen3-8B LM head.
+- Added dependency-free Klein adapter coverage and a bounded live Forge smoke
+  harness. A real local Klein 4B stack completed deterministic text generation
+  with 64 output tokens, 306 visible characters, and clean weight unloading.
+- Made the Forgy image attachment clickable: an uploaded or explicitly grabbed
+  image opens in a full-screen lightbox and closes again on image, backdrop,
+  close-button, Escape, or Enter activation.
+- Added an undoable `×` control below the working prompt's copy control and kept
+  conversation state unchanged when only the working prompt is cleared.
+- Added `Grab last generated prompt`. Forgy records the positive prompt when the
+  latest txt2img or img2img gallery changes, restores that exact generation
+  prompt on explicit request, and keeps the previous working prompt available to
+  Undo.
+- Reset successful image/prompt grab labels after two seconds and successful
+  Undo/Clear labels after one second instead of leaving stale checkmarks visible.
+- Promoted the combined idea, image-analysis, and refinement behavior to Forgy
+  Chat's built-in `Default` persona. The former built-in prompt remains available
+  as `Default Legacy`; only its exact unchanged hash migrates, so edited defaults
+  and custom personas remain untouched.
+
 ## 0.5.1-alpha.1 - 2026-08-11
 
 - Renamed the public product to `Forgy — Forge Neo Prompt Studio` across the UI,
@@ -179,7 +207,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.1-alpha.1...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...HEAD
+[0.5.2-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.1-alpha.1...v0.5.2-alpha.1
 [0.5.1-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...v0.5.1-alpha.1
 [0.5.0-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-alpha.1...v0.5.0-beta.1
 [0.5.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.3.0-alpha.1...v0.5.0-alpha.1

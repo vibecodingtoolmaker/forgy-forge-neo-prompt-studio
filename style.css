@@ -25,3 +25,83 @@
 .forge-krea-persona-dropdown ul.options::-webkit-scrollbar-thumb:hover {
     background: var(--button-primary-background-fill, #f97316);
 }
+
+.forge-krea-working-prompt {
+    position: relative;
+}
+
+#forge_krea_clear_working_prompt {
+    position: absolute;
+    z-index: 4;
+    top: 1.9rem;
+    right: 0.55rem;
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px;
+    padding: 0 !important;
+    border-radius: 8px;
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.forge-krea-working-prompt textarea {
+    padding-right: 3rem !important;
+}
+
+#forge_krea_forgy_image img {
+    cursor: zoom-in;
+}
+
+.forge-krea-image-lightbox {
+    position: fixed;
+    z-index: 10000;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
+    background: rgb(2 6 23 / 88%);
+    cursor: zoom-out;
+}
+
+.forge-krea-image-lightbox-preview {
+    display: block;
+    max-width: min(94vw, 1800px);
+    max-height: 92vh;
+    object-fit: contain;
+    border-radius: 10px;
+    box-shadow: 0 24px 80px rgb(0 0 0 / 65%);
+    cursor: zoom-out;
+}
+
+.forge-krea-image-lightbox-close {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border: 1px solid rgb(255 255 255 / 35%);
+    border-radius: 10px;
+    background: rgb(15 23 42 / 90%);
+    color: white;
+    font-size: 1.7rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.forge-krea-image-lightbox-close:hover {
+    border-color: var(--button-primary-background-fill, #f97316);
+    background: var(--button-primary-background-fill, #f97316);
+}
+
+@media (max-width: 640px) {
+    .forge-krea-image-lightbox {
+        padding: 1rem;
+    }
+
+    .forge-krea-image-lightbox-preview {
+        max-width: 96vw;
+        max-height: 88vh;
+    }
+}

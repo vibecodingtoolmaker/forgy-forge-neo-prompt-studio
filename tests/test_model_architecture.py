@@ -5,7 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-from forgy.adapters import AdapterError, Krea2Adapter, ZImageAdapter
+from forgy.adapters import (
+    AdapterError,
+    Flux2KleinAdapter,
+    Krea2Adapter,
+    ZImageAdapter,
+)
 from forgy.capabilities import (
     CapabilityManager,
     ModelCapabilities,
@@ -68,6 +73,43 @@ def _complete_zimage_stack(*, checkpoint_name="Z-Image-Turbo.safetensors"):
     engine.text_encoder = encoder
     engine.tokenizer = tokenizer
     engine.llama_template = "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
+    model = model_type()
+    model.forge_objects = SimpleNamespace(clip=clip)
+    model.text_processing_engine_gemma = engine
+    model.sd_checkpoint_info = SimpleNamespace(name=checkpoint_name)
+    return model, encoder, tokenizer, patcher, engine
+
+
+def _complete_flux2_klein_stack(
+    *,
+    checkpoint_name="flux-2-klein-4b.safetensors",
+    encoder_name="Qwen3_4B",
+    hidden_size=2560,
+):
+    encoder_type = _runtime_class(encoder_name, "backend.nn.llm.llama")
+    tokenizer_type = _runtime_class("Qwen2TokenizerFast", "test_runtime")
+    engine_type = _runtime_class(
+        "KleinTextProcessingEngine", "backend.text_processing.klein_engine"
+    )
+    model_type = _runtime_class("Flux2", "backend.diffusion_engine.flux2")
+
+    encoder = encoder_type()
+    encoder.model = SimpleNamespace(
+        config=SimpleNamespace(hidden_size=hidden_size, vocab_size=151936)
+    )
+    tokenizer = tokenizer_type()
+    patcher = object()
+    clip = SimpleNamespace(
+        cond_stage_model=SimpleNamespace(qwen3=encoder),
+        tokenizer=SimpleNamespace(qwen3=tokenizer),
+        patcher=patcher,
+    )
+    engine = engine_type()
+    engine.text_encoder = encoder
+    engine.tokenizer = tokenizer
+    engine.llama_template = (
+        "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    )
     model = model_type()
     model.forge_objects = SimpleNamespace(clip=clip)
     model.text_processing_engine_gemma = engine
@@ -217,6 +259,68 @@ class ModelArchitectureTests(unittest.TestCase):
         image_state = effective.for_workflow(Workflow.IMAGE_TO_PROMPT)
         self.assertFalse(image_state.enabled)
         self.assertIn("does not support", image_state.reason)
+
+    def test_flux2_klein_4b_resolves_as_isolated_text_adapter(self) -> None:
+        adapter = Flux2KleinAdapter()
+        manager = ModelManager((Krea2Adapter(), ZImageAdapter(), adapter))
+        model, encoder, tokenizer, patcher, _engine = _complete_flux2_klein_stack()
+
+        context = manager.resolve(model)
+
+        self.assertEqual(context.identity.adapter_id, "flux2-klein-qwen3-4b")
+        self.assertEqual(context.identity.family, "flux2-klein")
+        self.assertEqual(context.identity.variant, "4b")
+        self.assertEqual(
+            context.identity.display_name,
+            "FLUX.2 Klein 4B · Qwen3 4B",
+        )
+        self.assertIs(context.components.encoder, encoder)
+        self.assertIs(context.components.tokenizer, tokenizer)
+        self.assertIs(context.components.patcher, patcher)
+        self.assertTrue(context.capabilities.text_generation)
+        self.assertFalse(context.capabilities.vision_input)
+        self.assertFalse(context.capabilities.supports(Workflow.IMAGE_TO_PROMPT))
+        self.assertTrue(context.capabilities.supports(Workflow.FORGY_CHAT))
+        self.assertNotIn("components", adapter.__dict__)
+        self.assertNotIn("sd_model", adapter.__dict__)
+
+        base_model, *_ = _complete_flux2_klein_stack(
+            checkpoint_name="FLUX.2-klein-base-4B.safetensors"
+        )
+        base_context = manager.resolve(base_model)
+        self.assertEqual(base_context.identity.variant, "base-4b")
+        self.assertIn("Base 4B", base_context.identity.display_name)
+
+    def test_flux2_klein_rejects_9b_without_untied_lm_head(self) -> None:
+        model, *_ = _complete_flux2_klein_stack(
+            checkpoint_name="flux-2-klein-9b.safetensors",
+            encoder_name="Qwen3_8B",
+            hidden_size=4096,
+        )
+
+        with self.assertRaisesRegex(AdapterError, "untied LM head"):
+            ModelManager((Flux2KleinAdapter(),)).resolve(model)
+
+    def test_flux2_klein_builds_its_existing_no_think_template_once(self) -> None:
+        adapter = Flux2KleinAdapter()
+        _model, _encoder, _tokenizer, _patcher, engine = _complete_flux2_klein_stack()
+
+        rendered = adapter.render_generation_prompt(
+            engine,
+            "a glass greenhouse in winter",
+            "use soft morning light",
+            "Return one polished natural-language prompt.",
+            workflow=Workflow.IDEA_TO_PROMPT,
+            validate_system_prompt=lambda value, **_kwargs: value,
+        )
+
+        self.assertTrue(rendered.startswith("<|im_start|>system\n"))
+        self.assertIn("<|im_start|>user\na glass greenhouse", rendered)
+        self.assertIn("Additional instruction:\nuse soft morning light", rendered)
+        self.assertIn("Treat the user's image idea", rendered)
+        self.assertIn("finished natural-language image prompt", rendered)
+        self.assertEqual(rendered.count("<think>"), 1)
+        self.assertTrue(rendered.endswith("<think>\n\n</think>\n\n"))
 
     def test_runtime_binding_keeps_dispatch_inside_the_selected_adapter(self) -> None:
         calls = []

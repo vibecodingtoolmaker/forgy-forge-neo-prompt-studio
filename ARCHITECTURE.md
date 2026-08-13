@@ -31,6 +31,7 @@ forgy/
   model_manager.py       deterministic, fail-closed adapter resolution
   adapters/
     base.py              dependency-free adapter contracts
+    flux2_klein.py       FLUX.2 Klein 4B text-only adapter
     krea2.py             KREA2 detection, components, prompt protocol, and dispatch
     qwen.py              shared visible-output and repetition safeguards
     zimage.py            Z-Image Base/Turbo text-only adapter
@@ -74,6 +75,25 @@ unchanged.
 
 The shared autoregressive runtime reconstructs logits only through the existing
 tied input embedding matrix; it does not load an LM head or a second model.
+
+## FLUX.2 Klein 4B adapter
+
+FLUX.2 Klein 4B and Base 4B use an explicit third adapter. It matches Forge's
+exact `Flux2` diffusion-engine class and validates the Klein processing engine,
+Qwen3-4B encoder class, object identity, hidden width, vocabulary, tokenizer,
+and `ModelPatcher`. Like Z-Image, it enables text-only Forgy Chat,
+Idea-to-Prompt, and Refine while capability-gating Image-to-Prompt and Forgy
+image attachment.
+
+The adapter preserves Forge's existing Klein chat template, including its
+single empty thinking block, and owns separate workflow contracts for
+natural-language FLUX prompts. It reuses the same request-local tied-embedding
+generation runtime without changing the frozen Z-Image adapter.
+
+Klein 9B intentionally fails closed. Forge exposes its Qwen3-8B transformer but
+does not retain the checkpoint's separate, untied LM head. Forgy therefore
+cannot reconstruct correct output logits from the input embedding matrix and
+does not guess, load an extra head, or modify Forge core.
 
 ## Adding another model family
 
