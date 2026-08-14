@@ -1,6 +1,6 @@
 # Project Status: Forgy — Forge Neo Prompt Studio
 
-Last updated: 2026-08-13
+Last updated: 2026-08-14
 
 This file is the handover document for continuing development in a new Codex
 chat. Read `AGENTS.md` before changing the project.
@@ -14,7 +14,8 @@ chat. Read `AGENTS.md` before changing the project.
   `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`
 - Development branch: `develop`; stable public release branch: `main`;
   development prereleases may be tagged from `develop`
-- Current development prerelease: `v0.5.2-alpha.1` (2026-08-13)
+- Current main prerelease: `v0.5.2-beta.1` (2026-08-14)
+- Previous development prerelease: `v0.5.2-alpha.1` (2026-08-13)
 - Previous published prerelease: `v0.5.1-alpha.1` (2026-08-11)
 - The extension's public name is now **Forgy — Forge Neo Prompt Studio**. The
   Python filename, Gradio element IDs, callback names, and internal Forge tab ID
@@ -22,7 +23,7 @@ chat. Read `AGENTS.md` before changing the project.
   Existing installations may also retain their original directory name.
   Renaming those identifiers is a separate compatibility migration.
 
-The Alpha 0.5.2 development prerelease includes the main script, modular
+The Beta 0.5.2 main prerelease includes the main script, modular
 `forgy` package, architecture document, tests, public documentation, metadata,
 issue forms, all four persona examples, license header, security policy,
 roadmap, changelog, `.gitignore`, `style.css`, this status file, and `AGENTS.md`.
@@ -69,6 +70,16 @@ Forge's active model patcher, encoder, tokenizer, and vision module. The compact
 runtime bar can explicitly ask Forge to load the model, text encoder, and VAE
 already selected in Forge's normal controls; it does not change those
 selections.
+
+## Changes in v0.5.2-beta.1
+
+- Promoted the complete `v0.5.2-alpha.1` multi-adapter implementation to the
+  public `main` release line.
+- Added prominent README guidance that Forgy's prompt quality and instruction
+  following depend strongly on the active text encoder.
+- Documented support for alternative compatible text-encoder weights when they
+  work with the selected model and retain the architecture, tokenizer,
+  dimensions, and output-head contract required by its Forgy adapter.
 
 ## Changes in v0.5.2-alpha.1
 
@@ -379,8 +390,8 @@ git diff --check
 
 ## Recommended next steps
 
-1. Confirm that tag/release `v0.5.2-alpha.1`, the `develop` branch commit, and
-   the GitHub Actions validation all refer to the same reviewed source state.
+1. Confirm that tag/release `v0.5.2-beta.1`, the `main` branch commit, and the
+   GitHub Actions validation all refer to the same reviewed source state.
 2. Restart the user's Forge test instance and run one focused KREA2/Qwen3-VL
    smoke pass through all four workflows.
 3. Specifically verify each `+ generate` button remains locked only until the
@@ -393,7 +404,7 @@ git diff --check
    `refinement_personas.json`, `agent_personas.json`, generated image, log, or
    personal path is staged.
 6. Run the four automated commands above before any follow-up release.
-7. Triage Alpha 0.5.2 feedback without mixing unrelated fixes into one release.
+7. Triage Beta 0.5.2 feedback without mixing unrelated fixes into one release.
 8. Restart an isolated Forge UI, switch between KREA2, Z-Image, and Klein 4B, and verify
    capability-driven buttons, image inputs, status text, and Default persona
    behavior. Then run a separate bounded Turbo text smoke.

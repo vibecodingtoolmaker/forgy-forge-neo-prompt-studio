@@ -46,7 +46,7 @@ from forgy.model_manager import ModelContext, ModelManager
 
 LOGGER = logging.getLogger("forgy_prompt_studio")
 EXTENSION_NAME = "Forgy — Forge Neo Prompt Studio"
-EXTENSION_VERSION = "0.5.2-alpha.1"
+EXTENSION_VERSION = "0.5.2-beta.1"
 # Compatibility aliases retained for diagnostics and existing static integrations.
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"

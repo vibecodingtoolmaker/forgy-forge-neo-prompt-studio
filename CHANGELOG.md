@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.2-beta.1 - 2026-08-14
+
+- Promoted the current multi-adapter release to the public `main` branch with
+  KREA2/Qwen3-VL, text-only Z-Image Base/Turbo, and text-only FLUX.2 Klein
+  4B/Base 4B support.
+- Documented that Forgy's output quality, instruction following, consistency,
+  and response-protocol adherence depend strongly on the active text encoder.
+- Clarified that users may select alternative compatible text-encoder weights
+  when they work with the active model and satisfy the corresponding Forgy
+  adapter's architecture, tokenizer, dimensions, and output-head contract.
+
 ## 0.5.2-alpha.1 - 2026-08-13
 
 - Added an isolated text-only FLUX.2 Klein 4B/Base 4B adapter using Forge's
@@ -207,7 +218,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...HEAD
+[0.5.2-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...v0.5.2-beta.1
 [0.5.2-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.1-alpha.1...v0.5.2-alpha.1
 [0.5.1-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...v0.5.1-alpha.1
 [0.5.0-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-alpha.1...v0.5.0-beta.1

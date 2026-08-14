@@ -122,9 +122,9 @@ class PublicMetadataTests(unittest.TestCase):
             self.constants["EXTENSION_NAME"],
             "Forgy — Forge Neo Prompt Studio",
         )
-        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.2-alpha.1")
+        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.2-beta.1")
         self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
-        self.assertIn("**Alpha 0.5.2-alpha.1 (development prerelease)**", self.readme)
+        self.assertIn("**Beta 0.5.2-beta.1 (main prerelease)**", self.readme)
         self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
         self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
         self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))
@@ -140,6 +140,13 @@ class PublicMetadataTests(unittest.TestCase):
             'return [(tab, EXTENSION_NAME, "forge_krea_prompt_assistant")]',
             self.source,
         )
+        for text_encoder_guidance in (
+            "quality depends strongly on the encoder weights selected",
+            "Alternative compatible text encoders may be selected in Forge",
+            "work with the active model",
+            "corresponding Forgy adapter",
+        ):
+            self.assertIn(text_encoder_guidance, self.readme)
 
     def test_general_workflow_language_is_model_family_neutral(self) -> None:
         self.assertIn(
