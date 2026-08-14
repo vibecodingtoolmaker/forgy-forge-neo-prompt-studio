@@ -30,9 +30,22 @@ by default.
 
 ### Z-Image adapter
 
-Add Z-Image as a separate backend adapter after the current adapter has been
-tested and stabilized. Backend-specific behavior should remain isolated instead
-of adding model-family conditionals throughout an existing implementation.
+The first separate Z-Image Base/Turbo adapter is included in the current beta.
+It reuses Forge's active Qwen3-4B encoder for text-only Forgy Chat,
+Idea-to-Prompt, and Refine while capability-gating all vision paths. Remaining
+work includes broader Base/Turbo prompt-quality testing, family-specific Default
+personas, UI smoke testing after model switches, and bounded output tuning.
+
+### FLUX.2 Klein adapter
+
+The initial FLUX.2 Klein 4B/Base 4B adapter is included in the current beta.
+It reuses Forge's active tied Qwen3-4B encoder for text-only Forgy Chat,
+Idea-to-Prompt, and Refine while leaving Klein reference-image handling in
+Forge. Automated contract coverage and a bounded real-model text smoke are
+complete. Normal Forge image generation plus broader Forgy prompt-quality and
+workflow testing remain part of beta validation. Klein 9B is explicitly out of
+scope unless Forge exposes its separate untied LM head without a second model
+loader.
 
 ### Forgy guided generation loop
 

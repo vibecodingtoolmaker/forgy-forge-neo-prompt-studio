@@ -4,12 +4,79 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.2-beta.1 - 2026-08-14
+
+- Promoted the current multi-adapter release to the public `main` branch with
+  KREA2/Qwen3-VL, text-only Z-Image Base/Turbo, and text-only FLUX.2 Klein
+  4B/Base 4B support.
+- Documented that Forgy's output quality, instruction following, consistency,
+  and response-protocol adherence depend strongly on the active text encoder.
+- Clarified that users may select alternative compatible text-encoder weights
+  when they work with the active model and satisfy the corresponding Forgy
+  adapter's architecture, tokenizer, dimensions, and output-head contract.
+
+## 0.5.2-alpha.1 - 2026-08-13
+
+- Added an isolated text-only FLUX.2 Klein 4B/Base 4B adapter using Forge's
+  active tied Qwen3-4B encoder, tokenizer, and `ModelPatcher` for Forgy Chat,
+  Idea-to-Prompt, and Refine.
+- Added Klein-specific stack validation and workflow contracts without changing
+  the released Z-Image adapter or shared personas.
+- Made Klein 9B fail closed with an explicit explanation because Forge discards
+  its separate untied Qwen3-8B LM head.
+- Added dependency-free Klein adapter coverage and a bounded live Forge smoke
+  harness. A real local Klein 4B stack completed deterministic text generation
+  with 64 output tokens, 306 visible characters, and clean weight unloading.
+- Made the Forgy image attachment clickable: an uploaded or explicitly grabbed
+  image opens in a full-screen lightbox and closes again on image, backdrop,
+  close-button, Escape, or Enter activation.
+- Added an undoable `×` control below the working prompt's copy control and kept
+  conversation state unchanged when only the working prompt is cleared.
+- Added `Grab last generated prompt`. Forgy records the positive prompt when the
+  latest txt2img or img2img gallery changes, restores that exact generation
+  prompt on explicit request, and keeps the previous working prompt available to
+  Undo.
+- Reset successful image/prompt grab labels after two seconds and successful
+  Undo/Clear labels after one second instead of leaving stale checkmarks visible.
+- Promoted the combined idea, image-analysis, and refinement behavior to Forgy
+  Chat's built-in `Default` persona. The former built-in prompt remains available
+  as `Default Legacy`; only its exact unchanged hash migrates, so edited defaults
+  and custom personas remain untouched.
+
+## 0.5.1-alpha.1 - 2026-08-11
+
 - Renamed the public product to `Forgy — Forge Neo Prompt Studio` across the UI,
   documentation, support files, and repository metadata.
 - Updated installation, workflow badge, issue, release, and comparison links
   for `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`.
 - Kept compatibility-sensitive Python names, callback and tab IDs, CSS classes,
   and existing installation directories unchanged.
+- Added a dependency-free model adapter package with explicit model identity,
+  request-local component resolution, typed capabilities, and fail-closed model
+  selection.
+- Moved KREA2 stack validation, Qwen3-VL prompt protocol, visible-output
+  filtering, and runtime dispatch behind the first explicit adapter while
+  preserving the established generation loops and compatibility entry point.
+- Added capability-driven backend guards and dynamic Gradio workflow/image
+  control updates after Forge loads the user's current selection.
+- Added focused adapter, capability, no-persistent-model-state, and full Forge
+  bootstrap validation.
+- Added the initial Z-Image Base/Turbo adapter using Forge's active Qwen3-4B
+  encoder and the shared tied-embedding autoregressive text runtime. Forgy Chat,
+  Idea-to-Prompt, and Refine are enabled; vision workflows are explicitly
+  disabled.
+- Live-validated a bounded 64-token Z-Image Base/Qwen3-4B text request in an
+  isolated Forge process with no image generation, no saved settings, and model
+  unload afterward.
+- Made Forgy Chat accept harmless `FORGY reply:` / `UPDATED PROMPT:` marker
+  variations while still preserving the working prompt for unstructured model
+  output.
+- Added Z-Image-only workflow contracts for Idea-to-Prompt, Refine, and Forgy
+  Chat so the smaller Qwen treats user text as visual source content, preserves
+  explicit concepts, and follows each workflow's output shape. KREA2 prompt
+  rendering remains unchanged.
+- Added a visible capability explanation beside both disabled image inputs when
+  the active Forgy adapter is text-only.
 
 ## 0.5.0-beta.1 - 2026-08-05
 
@@ -151,7 +218,10 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...HEAD
+[0.5.2-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...v0.5.2-beta.1
+[0.5.2-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.1-alpha.1...v0.5.2-alpha.1
+[0.5.1-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...v0.5.1-alpha.1
 [0.5.0-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-alpha.1...v0.5.0-beta.1
 [0.5.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.3.0-alpha.1...v0.5.0-alpha.1
 [0.3.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/releases/tag/v0.3.0-alpha.1
