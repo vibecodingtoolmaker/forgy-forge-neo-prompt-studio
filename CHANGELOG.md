@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.2-beta.2 - 2026-10-06
+
+- Restored KREA2, Z-Image, and FLUX.2 Klein detection after Forge's
+  `TextProcessingEngine` rewrite by validating the current wrapper classes and
+  their underlying Forge-owned encoder and tokenizer identities.
+- Preserved compatibility with the legacy direct engine objects and fail-closed
+  rejection of mismatched wrappers.
+- Updated KREA2 Image-to-Prompt to use Forge's current `SDClipModel`
+  `process_tokens` path and image-token contract while retaining the legacy
+  `process_embeds` path.
+- Included the post-beta public Forgy persona wording cleanup from `develop`.
+
 ## 0.5.2-beta.1 - 2026-08-14
 
 - Promoted the current multi-adapter release to the public `main` branch with
@@ -218,7 +230,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.2...HEAD
+[0.5.2-beta.2]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...v0.5.2-beta.2
 [0.5.2-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...v0.5.2-beta.1
 [0.5.2-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.1-alpha.1...v0.5.2-alpha.1
 [0.5.1-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.0-beta.1...v0.5.1-alpha.1

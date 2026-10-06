@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .base import AdapterError, AdapterProbe, ModelIdentity
+from .base import (
+    AdapterError,
+    AdapterProbe,
+    ModelIdentity,
+    engine_component_matches,
+)
 from .qwen import (
     decode_generated_text,
     repetition_loop_suffix,
@@ -24,8 +29,11 @@ from ..capabilities import (
 
 
 FLUX2_KLEIN_MODEL_CLASS = "backend.diffusion_engine.flux2.Flux2"
-FLUX2_KLEIN_ENGINE_CLASS = (
-    "backend.text_processing.klein_engine.KleinTextProcessingEngine"
+FLUX2_KLEIN_ENGINE_CLASSES = frozenset(
+    {
+        "backend.text_processing.klein_engine.KleinTextProcessingEngine",
+        "backend.text_processing.klein_engine.Qwen3_4B_8B_Engine",
+    }
 )
 FLUX2_KLEIN_ENCODER_MODULE = "backend.nn.llm.llama"
 FLUX2_KLEIN_ENCODER_CLASS = "Qwen3_4B"
@@ -126,7 +134,9 @@ class Flux2KleinAdapter:
         tokenizer_container = getattr(clip, "tokenizer", None)
         encoder = getattr(cond_stage_model, "qwen3", None)
         tokenizer = getattr(tokenizer_container, "qwen3", None)
-        engine = getattr(sd_model, "text_processing_engine_gemma", None)
+        engine = getattr(sd_model, "text_processing_engine_qwen", None)
+        if engine is None:
+            engine = getattr(sd_model, "text_processing_engine_gemma", None)
 
         if clip is None or encoder is None or tokenizer is None or engine is None:
             raise AdapterError(
@@ -134,16 +144,24 @@ class Flux2KleinAdapter:
                 "Klein were not found. Select a complete Klein 4B stack in "
                 "Forge, then use 'Load current Forge selection' above."
             )
-        if self._class_path(engine) != FLUX2_KLEIN_ENGINE_CLASS:
+        if self._class_path(engine) not in FLUX2_KLEIN_ENGINE_CLASSES:
             raise AdapterError(
                 "The active FLUX.2 Klein text-processing engine is not supported: "
                 f"{self._class_path(engine)}"
             )
-        if getattr(engine, "text_encoder", None) is not encoder:
+        if not engine_component_matches(
+            getattr(engine, "text_encoder", None),
+            encoder,
+            wrapper_attribute="transformer",
+        ):
             raise AdapterError(
                 "Forge is using unexpectedly different FLUX.2 Klein Qwen3 objects."
             )
-        if getattr(engine, "tokenizer", None) is not tokenizer:
+        if not engine_component_matches(
+            getattr(engine, "tokenizer", None),
+            tokenizer,
+            wrapper_attribute="tokenizer",
+        ):
             raise AdapterError(
                 "Forge is using unexpectedly different FLUX.2 Klein tokenizer objects."
             )

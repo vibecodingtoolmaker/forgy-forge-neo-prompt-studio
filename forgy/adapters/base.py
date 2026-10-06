@@ -15,6 +15,19 @@ class AdapterError(RuntimeError):
     """Expected validation or compatibility failure from a model adapter."""
 
 
+def engine_component_matches(
+    candidate: Any,
+    expected: Any,
+    *,
+    wrapper_attribute: str,
+) -> bool:
+    """Accept Forge's legacy direct objects and current lightweight wrappers."""
+
+    return (
+        candidate is expected or getattr(candidate, wrapper_attribute, None) is expected
+    )
+
+
 @dataclass(frozen=True)
 class AdapterProbe:
     """Read-only result of asking an adapter whether a live stack belongs to it."""

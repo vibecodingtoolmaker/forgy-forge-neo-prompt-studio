@@ -30,10 +30,18 @@ def _runtime_class(name: str, module: str):
     return value
 
 
-def _complete_krea2_stack():
+def _complete_krea2_stack(*, current_forge=False):
     encoder_type = _runtime_class("Qwen3VL", "backend.nn.llm.llama")
     tokenizer_type = _runtime_class("Qwen3VLTokenizer", "test_runtime")
     model_type = _runtime_class("Krea2", "backend.diffusion_engine.krea")
+    engine_type = _runtime_class(
+        "Qwen3VL4BEngine" if current_forge else "Qwen3VLTextProcessingEngine",
+        (
+            "backend.text_processing.krea2_engine"
+            if current_forge
+            else "backend.text_processing.qwen3vl_engine"
+        ),
+    )
 
     encoder = encoder_type()
     tokenizer = tokenizer_type()
@@ -43,18 +51,31 @@ def _complete_krea2_stack():
         tokenizer=SimpleNamespace(qwen3vl_4b=tokenizer),
         patcher=patcher,
     )
-    engine = SimpleNamespace(text_encoder=encoder, tokenizer=tokenizer)
+    engine = engine_type()
+    engine.text_encoder = (
+        SimpleNamespace(transformer=encoder) if current_forge else encoder
+    )
+    engine.tokenizer = (
+        SimpleNamespace(tokenizer=tokenizer) if current_forge else tokenizer
+    )
     model = model_type()
     model.forge_objects = SimpleNamespace(clip=clip)
     model.text_processing_engine_qwen = engine
     return model, encoder, tokenizer, patcher
 
 
-def _complete_zimage_stack(*, checkpoint_name="Z-Image-Turbo.safetensors"):
+def _complete_zimage_stack(
+    *, checkpoint_name="Z-Image-Turbo.safetensors", current_forge=False
+):
     encoder_type = _runtime_class("Qwen3_4B", "backend.nn.llm.llama")
     tokenizer_type = _runtime_class("Qwen2Tokenizer", "test_runtime")
     engine_type = _runtime_class(
-        "Qwen3TextProcessingEngine", "backend.text_processing.qwen3_engine"
+        "Qwen34BEngine" if current_forge else "Qwen3TextProcessingEngine",
+        (
+            "backend.text_processing.z_image_engine"
+            if current_forge
+            else "backend.text_processing.qwen3_engine"
+        ),
     )
     model_type = _runtime_class("ZImage", "backend.diffusion_engine.zimage")
 
@@ -70,12 +91,19 @@ def _complete_zimage_stack(*, checkpoint_name="Z-Image-Turbo.safetensors"):
         patcher=patcher,
     )
     engine = engine_type()
-    engine.text_encoder = encoder
-    engine.tokenizer = tokenizer
+    engine.text_encoder = (
+        SimpleNamespace(transformer=encoder) if current_forge else encoder
+    )
+    engine.tokenizer = (
+        SimpleNamespace(tokenizer=tokenizer) if current_forge else tokenizer
+    )
     engine.llama_template = "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
     model = model_type()
     model.forge_objects = SimpleNamespace(clip=clip)
-    model.text_processing_engine_gemma = engine
+    if current_forge:
+        model.text_processing_engine_qwen = engine
+    else:
+        model.text_processing_engine_gemma = engine
     model.sd_checkpoint_info = SimpleNamespace(name=checkpoint_name)
     return model, encoder, tokenizer, patcher, engine
 
@@ -85,11 +113,13 @@ def _complete_flux2_klein_stack(
     checkpoint_name="flux-2-klein-4b.safetensors",
     encoder_name="Qwen3_4B",
     hidden_size=2560,
+    current_forge=False,
 ):
     encoder_type = _runtime_class(encoder_name, "backend.nn.llm.llama")
     tokenizer_type = _runtime_class("Qwen2TokenizerFast", "test_runtime")
     engine_type = _runtime_class(
-        "KleinTextProcessingEngine", "backend.text_processing.klein_engine"
+        "Qwen3_4B_8B_Engine" if current_forge else "KleinTextProcessingEngine",
+        "backend.text_processing.klein_engine",
     )
     model_type = _runtime_class("Flux2", "backend.diffusion_engine.flux2")
 
@@ -105,14 +135,21 @@ def _complete_flux2_klein_stack(
         patcher=patcher,
     )
     engine = engine_type()
-    engine.text_encoder = encoder
-    engine.tokenizer = tokenizer
+    engine.text_encoder = (
+        SimpleNamespace(transformer=encoder) if current_forge else encoder
+    )
+    engine.tokenizer = (
+        SimpleNamespace(tokenizer=tokenizer) if current_forge else tokenizer
+    )
     engine.llama_template = (
         "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
     )
     model = model_type()
     model.forge_objects = SimpleNamespace(clip=clip)
-    model.text_processing_engine_gemma = engine
+    if current_forge:
+        model.text_processing_engine_qwen = engine
+    else:
+        model.text_processing_engine_gemma = engine
     model.sd_checkpoint_info = SimpleNamespace(name=checkpoint_name)
     return model, encoder, tokenizer, patcher, engine
 
@@ -162,6 +199,27 @@ class ModelArchitectureTests(unittest.TestCase):
         self.assertIsNot(first.components, second.components)
         self.assertNotIn("components", adapter.__dict__)
         self.assertNotIn("sd_model", adapter.__dict__)
+
+    def test_current_forge_wrappers_resolve_all_released_model_families(self) -> None:
+        stacks = (
+            (_complete_krea2_stack(current_forge=True), Krea2Adapter()),
+            (_complete_zimage_stack(current_forge=True), ZImageAdapter()),
+            (_complete_flux2_klein_stack(current_forge=True), Flux2KleinAdapter()),
+        )
+
+        for stack, adapter in stacks:
+            with self.subTest(adapter=adapter.adapter_id):
+                model, encoder, tokenizer, *_rest = stack
+                context = ModelManager((adapter,)).resolve(model)
+                self.assertIs(context.components.encoder, encoder)
+                self.assertIs(context.components.tokenizer, tokenizer)
+
+    def test_current_forge_wrapper_identity_mismatch_still_fails_closed(self) -> None:
+        model, *_ = _complete_krea2_stack(current_forge=True)
+        model.text_processing_engine_qwen.text_encoder.transformer = object()
+
+        with self.assertRaisesRegex(AdapterError, "different text encoder"):
+            ModelManager((Krea2Adapter(),)).resolve(model)
 
     def test_manager_fails_closed_for_unknown_or_incomplete_stacks(self) -> None:
         adapter = Krea2Adapter()
