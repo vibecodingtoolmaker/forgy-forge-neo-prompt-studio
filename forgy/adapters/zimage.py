@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .base import AdapterError, AdapterProbe, ModelIdentity
+from .base import (
+    AdapterError,
+    AdapterProbe,
+    ModelIdentity,
+    engine_component_matches,
+)
 from .qwen import (
     decode_generated_text,
     repetition_loop_suffix,
@@ -24,7 +29,12 @@ from ..capabilities import (
 
 
 ZIMAGE_MODEL_CLASS = "backend.diffusion_engine.zimage.ZImage"
-ZIMAGE_ENGINE_CLASS = "backend.text_processing.qwen3_engine.Qwen3TextProcessingEngine"
+ZIMAGE_ENGINE_CLASSES = frozenset(
+    {
+        "backend.text_processing.qwen3_engine.Qwen3TextProcessingEngine",
+        "backend.text_processing.z_image_engine.Qwen34BEngine",
+    }
+)
 ZIMAGE_ENCODER_MODULE = "backend.nn.llm.llama"
 ZIMAGE_ENCODER_CLASS = "Qwen3_4B"
 ZIMAGE_HIDDEN_SIZE = 2560
@@ -120,7 +130,9 @@ class ZImageAdapter:
         tokenizer_container = getattr(clip, "tokenizer", None)
         encoder = getattr(cond_stage_model, "qwen3", None)
         tokenizer = getattr(tokenizer_container, "qwen3", None)
-        engine = getattr(sd_model, "text_processing_engine_gemma", None)
+        engine = getattr(sd_model, "text_processing_engine_qwen", None)
+        if engine is None:
+            engine = getattr(sd_model, "text_processing_engine_gemma", None)
 
         if clip is None or encoder is None or tokenizer is None or engine is None:
             raise AdapterError(
@@ -128,14 +140,22 @@ class ZImageAdapter:
                 "Z-Image adapter were not found. Select a complete Z-Image stack "
                 "in Forge, then use 'Load current Forge selection' above."
             )
-        if self._class_path(engine) != ZIMAGE_ENGINE_CLASS:
+        if self._class_path(engine) not in ZIMAGE_ENGINE_CLASSES:
             raise AdapterError(
                 "The active Z-Image text-processing engine is not supported: "
                 f"{self._class_path(engine)}"
             )
-        if getattr(engine, "text_encoder", None) is not encoder:
+        if not engine_component_matches(
+            getattr(engine, "text_encoder", None),
+            encoder,
+            wrapper_attribute="transformer",
+        ):
             raise AdapterError("Forge is using unexpectedly different Qwen3 objects.")
-        if getattr(engine, "tokenizer", None) is not tokenizer:
+        if not engine_component_matches(
+            getattr(engine, "tokenizer", None),
+            tokenizer,
+            wrapper_attribute="tokenizer",
+        ):
             raise AdapterError(
                 "Forge is using unexpectedly different Qwen3 tokenizer objects."
             )

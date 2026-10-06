@@ -8,7 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .base import AdapterError, AdapterProbe, ModelIdentity
+from .base import (
+    AdapterError,
+    AdapterProbe,
+    ModelIdentity,
+    engine_component_matches,
+)
 from ..capabilities import (
     ModelCapabilities,
     PromptDialect,
@@ -23,6 +28,12 @@ from .qwen import (
 
 
 KREA2_MODEL_CLASS = "backend.diffusion_engine.krea.Krea2"
+KREA2_ENGINE_CLASSES = frozenset(
+    {
+        "backend.text_processing.qwen3vl_engine.Qwen3VLTextProcessingEngine",
+        "backend.text_processing.krea2_engine.Qwen3VL4BEngine",
+    }
+)
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"
 CHAT_SYSTEM_START = "<|im_start|>system\n"
@@ -110,11 +121,24 @@ class Krea2Adapter:
                 "model adapter were not found. Select a complete supported stack "
                 "in Forge, then use 'Load current Forge selection' above."
             )
-        if getattr(engine, "text_encoder", None) is not encoder:
+        if self._class_path(engine) not in KREA2_ENGINE_CLASSES:
+            raise AdapterError(
+                "The active KREA2 text-processing engine is not supported: "
+                f"{self._class_path(engine)}"
+            )
+        if not engine_component_matches(
+            getattr(engine, "text_encoder", None),
+            encoder,
+            wrapper_attribute="transformer",
+        ):
             raise AdapterError(
                 "Forge is using unexpectedly different text encoder objects."
             )
-        if getattr(engine, "tokenizer", None) is not tokenizer:
+        if not engine_component_matches(
+            getattr(engine, "tokenizer", None),
+            tokenizer,
+            wrapper_attribute="tokenizer",
+        ):
             raise AdapterError(
                 "Forge is using unexpectedly different tokenizer objects."
             )

@@ -1,6 +1,6 @@
 # Project Status: Forgy — Forge Neo Prompt Studio
 
-Last updated: 2026-08-14
+Last updated: 2026-10-06
 
 This file is the handover document for continuing development in a new Codex
 chat. Read `AGENTS.md` before changing the project.
@@ -14,9 +14,9 @@ chat. Read `AGENTS.md` before changing the project.
   `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`
 - Development branch: `develop`; stable public release branch: `main`;
   development prereleases may be tagged from `develop`
-- Current main prerelease: `v0.5.2-beta.1` (2026-08-14)
+- Current main prerelease: `v0.5.2-beta.2` (2026-10-06)
+- Previous main prerelease: `v0.5.2-beta.1` (2026-08-14)
 - Previous development prerelease: `v0.5.2-alpha.1` (2026-08-13)
-- Previous published prerelease: `v0.5.1-alpha.1` (2026-08-11)
 - The extension's public name is now **Forgy — Forge Neo Prompt Studio**. The
   Python filename, Gradio element IDs, callback names, and internal Forge tab ID
   still contain `forge_krea_prompt_assistant` or `forge-krea` on purpose.
@@ -70,6 +70,18 @@ Forge's active model patcher, encoder, tokenizer, and vision module. The compact
 runtime bar can explicitly ask Forge to load the model, text encoder, and VAE
 already selected in Forge's normal controls; it does not change those
 selections.
+
+## Changes in v0.5.2-beta.2
+
+- Restored KREA2, Z-Image, and FLUX.2 Klein stack detection for Forge's current
+  text-processing wrappers while retaining compatibility with the earlier
+  direct engine objects.
+- Kept component validation tied to the underlying Forge-owned encoder and
+  tokenizer identities so mismatched wrappers still fail closed.
+- Updated KREA2 Image-to-Prompt for Forge's current `SDClipModel`
+  `process_tokens` path and image-token contract while retaining the legacy
+  `process_embeds` path.
+- Included the post-beta public Forgy persona wording cleanup from `develop`.
 
 ## Changes in v0.5.2-beta.1
 
@@ -362,7 +374,7 @@ must be restarted to load the latest code.
 Before this handover, the following checks passed for the current development
 implementation:
 
-- 63 dependency-free `unittest` tests;
+- 66 dependency-free `unittest` tests;
 - Ruff lint check;
 - Ruff format check;
 - `git diff --check` (apart from Git's existing LF-to-CRLF warning for
@@ -390,7 +402,7 @@ git diff --check
 
 ## Recommended next steps
 
-1. Confirm that tag/release `v0.5.2-beta.1`, the `main` branch commit, and the
+1. Confirm that tag/release `v0.5.2-beta.2`, the `main` branch commit, and the
    GitHub Actions validation all refer to the same reviewed source state.
 2. Restart the user's Forge test instance and run one focused KREA2/Qwen3-VL
    smoke pass through all four workflows.

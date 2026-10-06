@@ -99,6 +99,65 @@ class PublicMetadataTests(unittest.TestCase):
     def test_extension_script_compiles(self) -> None:
         compile(self.source, str(SCRIPT), "exec")
 
+    def test_krea2_image_token_supports_current_and_legacy_forge_engines(self) -> None:
+        class_path = lambda value: (
+            f"{type(value).__module__}.{type(value).__qualname__}"
+        )
+        image_token_id = isolated_function(
+            self.source,
+            "_krea_image_token_id",
+            {"_class_path": class_path},
+        )
+        current_type = type("Qwen3VL4BEngine", (), {})
+        current_type.__module__ = "backend.text_processing.krea2_engine"
+
+        self.assertEqual(image_token_id(SimpleNamespace(id_image=42)), 42)
+        self.assertEqual(image_token_id(current_type()), 151655)
+        self.assertIsNone(image_token_id(object()))
+
+        calls = []
+        embeds = SimpleNamespace(ndim=3, shape=(1, 3, 4))
+
+        def process_tokens(tokens, device):
+            calls.append((tokens, device))
+            return embeds, "attention-mask", [3], "embeds-info"
+
+        engine = current_type()
+        engine.text_encoder = SimpleNamespace(process_tokens=process_tokens)
+        encoder = SimpleNamespace(
+            build_image_inputs=lambda value, info: (
+                f"positions:{value.shape[1]}",
+                f"visual:{info}",
+                ["deepstack"],
+            )
+        )
+        multimodal_embeds = isolated_function(
+            self.source,
+            "_multimodal_embeds",
+            {
+                "_krea_image_token_id": image_token_id,
+                "PromptAssistantError": RuntimeError,
+                "memory_management": SimpleNamespace(
+                    text_encoder_device=lambda: "text-device"
+                ),
+            },
+        )
+
+        result = multimodal_embeds(engine, encoder, [1, 151655, 2], "image")
+
+        self.assertIs(result[0], embeds)
+        self.assertEqual(
+            result[1:],
+            (
+                "attention-mask",
+                "positions:3",
+                "visual:embeds-info",
+                ["deepstack"],
+            ),
+        )
+        self.assertEqual(calls[0][1], "text-device")
+        self.assertEqual(calls[0][0][0][1]["type"], "image")
+
     def test_expected_constants_are_literal_and_present(self) -> None:
         self.assertEqual(
             set(self.constants),
@@ -122,9 +181,9 @@ class PublicMetadataTests(unittest.TestCase):
             self.constants["EXTENSION_NAME"],
             "Forgy — Forge Neo Prompt Studio",
         )
-        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.2-beta.1")
+        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.2-beta.2")
         self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
-        self.assertIn("**Beta 0.5.2-beta.1 (main prerelease)**", self.readme)
+        self.assertIn("**Beta 0.5.2-beta.2 (main prerelease)**", self.readme)
         self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
         self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
         self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))
