@@ -1,6 +1,6 @@
 # Forgy — Forge Neo Prompt Studio
 
-**Beta 0.5.2-beta.2 (main prerelease)**
+**Beta 0.5.2-beta.3 (main prerelease)**
 
 [![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
@@ -17,9 +17,9 @@ Forgy Chat, Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement workflows. It
 has not yet been tested across a broad range of GPUs and Forge Neo
 configurations.
 
-This hotfix restores detection of already loaded KREA2, Z-Image, and FLUX.2
-Klein model stacks after Forge rewrote its text-processing engine wrappers. It
-also keeps compatibility with the earlier direct engine objects; no Forge core
+This hotfix restores cached prompt generation after Forge Neo 2.29.2 changed
+the shared Llama forward contract. Forgy now supports both Forge's earlier
+top-level KV-cache return and the current per-layer cache path. No Forge core
 changes or additional model loads are required.
 
 ## Welcome
@@ -49,7 +49,7 @@ user data to Codex. This project is not affiliated with or endorsed by OpenAI.
   VAE files available in Forge's configured model directories;
 - a CUDA-capable GPU supported by the Forge installation.
 
-Development and initial testing target Forge Neo 2.28.
+Development and current hotfix testing target Forge Neo 2.29.2.
 
 The KREA2 adapter supports its Qwen3-VL 4B text/vision encoder and a compatible
 VAE across all four workflows. The initial Z-Image Base/Turbo adapter reuses
