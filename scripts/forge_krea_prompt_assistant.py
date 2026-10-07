@@ -41,12 +41,13 @@ from forgy.adapters import (
     ZImageAdapter,
 )
 from forgy.capabilities import CapabilityManager, Workflow
+from forgy.forge_kv_compat import ForgeKVCacheError, forward_with_kv_cache
 from forgy.model_manager import ModelContext, ModelManager
 
 
 LOGGER = logging.getLogger("forgy_prompt_studio")
 EXTENSION_NAME = "Forgy — Forge Neo Prompt Studio"
-EXTENSION_VERSION = "0.5.2-beta.2"
+EXTENSION_VERSION = "0.5.2-beta.3"
 # Compatibility aliases retained for diagnostics and existing static integrations.
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"
@@ -1342,8 +1343,8 @@ def _prefill_with_deepstack(
                     make_hook(visual_embeds), with_kwargs=True
                 )
             )
-        return core_model(
-            None,
+        return _forward_with_kv_cache(
+            core_model,
             embeds=embeds,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -1390,6 +1391,26 @@ def _allocate_kv_cache(core_model, batch: int, capacity: int, device, dtype):
         )
         for _ in range(config.num_hidden_layers)
     ]
+
+
+def _forward_with_kv_cache(
+    core_model,
+    *,
+    embeds,
+    attention_mask,
+    past_key_values,
+    position_ids=None,
+):
+    try:
+        return forward_with_kv_cache(
+            core_model,
+            embeds=embeds,
+            attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            position_ids=position_ids,
+        )
+    except ForgeKVCacheError as exc:
+        raise PromptAssistantError(str(exc)) from exc
 
 
 def _kv_cache_bytes(config, batch: int, capacity: int, dtype: torch.dtype) -> int:
@@ -1623,8 +1644,8 @@ def _generate_with_active_text_adapter(
         if _generation_cancelled(generation_id):
             finish_reason = "cancelled"
             break
-        output = core_model(
-            None,
+        output = _forward_with_kv_cache(
+            core_model,
             embeds=embeds,
             attention_mask=None,
             past_key_values=past_key_values,
@@ -1898,8 +1919,8 @@ def _generate_with_active_krea_image(
             device=device,
             dtype=torch.long,
         )
-        output = core_model(
-            None,
+        output = _forward_with_kv_cache(
+            core_model,
             embeds=token_embeds,
             attention_mask=None,
             position_ids=decode_position_ids,

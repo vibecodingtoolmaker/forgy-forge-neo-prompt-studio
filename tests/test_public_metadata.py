@@ -181,9 +181,9 @@ class PublicMetadataTests(unittest.TestCase):
             self.constants["EXTENSION_NAME"],
             "Forgy — Forge Neo Prompt Studio",
         )
-        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.2-beta.2")
+        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.5.2-beta.3")
         self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
-        self.assertIn("**Beta 0.5.2-beta.2 (main prerelease)**", self.readme)
+        self.assertIn("**Beta 0.5.2-beta.3 (main prerelease)**", self.readme)
         self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
         self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
         self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))

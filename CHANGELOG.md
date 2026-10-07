@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.5.2-beta.3 - 2026-10-08
+
+- Restored Forgy text and KREA2 vision prompt generation after Forge Neo 2.29.2
+  stopped forwarding and returning `past_key_values` through its shared
+  `Llama2_` entry point.
+- Added an extension-local, request-local KV compatibility adapter. It preserves
+  Forge's earlier native cache contract and reconnects the current core through
+  its existing cache-capable transformer layers without patching Forge or
+  loading another model.
+- Added fail-closed cache shape, layer-count, and index validation plus an
+  optional real-core contract test when the extension is checked out inside
+  Forge. Cached prefill-plus-decode matches the equivalent full-context forward,
+  and a restarted KREA2 Idea-to-Prompt smoke passed on the release candidate.
+
 ## 0.5.2-beta.2 - 2026-10-06
 
 - Restored KREA2, Z-Image, and FLUX.2 Klein detection after Forge's
@@ -230,7 +244,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.2...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.3...HEAD
+[0.5.2-beta.3]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.2...v0.5.2-beta.3
 [0.5.2-beta.2]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...v0.5.2-beta.2
 [0.5.2-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...v0.5.2-beta.1
 [0.5.2-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.1-alpha.1...v0.5.2-alpha.1
