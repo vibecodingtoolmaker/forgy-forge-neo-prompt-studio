@@ -8,6 +8,21 @@ from __future__ import annotations
 import re
 
 
+QWEN_THINKING_SUFFIX = "<think>\n"
+QWEN_NO_THINKING_SUFFIX = "<think>\n\n</think>\n\n"
+
+
+def apply_model_thinking_mode(rendered_prompt: str, *, enabled: bool) -> str:
+    """Select Qwen's thinking or no-thinking assistant-prefix contract."""
+
+    rendered_prompt = str(rendered_prompt)
+    if rendered_prompt.endswith(QWEN_NO_THINKING_SUFFIX):
+        rendered_prompt = rendered_prompt[: -len(QWEN_NO_THINKING_SUFFIX)]
+    return rendered_prompt + (
+        QWEN_THINKING_SUFFIX if bool(enabled) else QWEN_NO_THINKING_SUFFIX
+    )
+
+
 def decode_generated_text(tokenizer, generated_ids) -> str:
     """Decode visibly while preserving reasoning markers for later filtering."""
 
@@ -49,13 +64,25 @@ def strip_model_thinking(text: str) -> tuple[str, bool]:
         text = text[: unmatched_open.start()]
         removed = True
 
-    text, dangling_closes = re.subn(
+    # In Qwen's thinking template the opening ``<think>`` is part of the input
+    # prefix. Generated tokens therefore commonly contain reasoning followed by
+    # only ``</think>`` and the visible answer.
+    dangling_close = re.search(
+        r"</(?:think|analysis)\s*>",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if dangling_close:
+        text = text[dangling_close.end() :]
+        removed = True
+
+    text = re.sub(
         r"</(?:think|analysis)\s*>",
         "",
         text,
         flags=re.IGNORECASE,
     )
-    return text.strip(), removed or bool(dangling_closes)
+    return text.strip(), removed
 
 
 def repetition_loop_suffix(token_ids: list[int]) -> tuple[int, int] | None:

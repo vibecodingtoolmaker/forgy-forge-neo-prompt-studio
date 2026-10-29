@@ -4,6 +4,91 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.6.0-alpha.2 - 2026-10-29
+
+- Made fresh persona stores runtime-level Default-only. Forgy no longer seeds
+  `Ghost` or `Default Legacy`, and saving a normal persona does not add either
+  entry. Existing edited defaults and user-created local personas remain intact;
+  the four tracked examples still contain exactly one `Default` each.
+- Fixed a severe MOSS Qwen3.5 runtime dtype mismatch. Forge can store the token
+  embedding in FP16 while the 32-layer transformer is BF16; Forgy previously
+  followed the embedding dtype, causing Forge `manual_cast` to materialize
+  converted backbone weights throughout every prefill and decode. Forgy now
+  validates the single dense projection dtype, converts embeddings once, and
+  loads the request-local LM head in that backbone dtype. On the RTX 5090 smoke,
+  the same 369-input/16-output request fell from 43.52 to 8.73 seconds, with
+  prefill falling from 11.64 to 1.26 seconds and decode from 27.74 to 1.48
+  seconds. A 64-token request completed in 8.94 seconds and the 871-token vision
+  prefill in 1.14 seconds.
+- Extended the MOSS smoke profiler with model-placement timing, per-call latency
+  statistics, CUDA-event totals for MLP/full/linear attention, module placement
+  and dtype census, and peak VRAM reporting.
+- Added an experimental MOSS-Image adapter for Forge's active Qwen3.5-9B
+  text/vision backbone. It enables Forgy Chat, Idea-to-Prompt, Image-to-Prompt,
+  and Refine without creating a second encoder. Because MOSS uses an untied output head that Forge
+  omits from its conditioning model, Forgy loads only the dense `lm_head` from
+  exactly one selected additional module for the request, requires full
+  single-device backbone placement, and fails closed for quantized, missing, or
+  ambiguous heads. Image-to-Prompt reuses Forge's active vision encoder and
+  Qwen3.5 three-axis MRoPE. RTX 5090 text, 64-token, synthetic-image, visible
+  Idea-to-Prompt, and visible Image-to-Prompt smokes returned clean output. The
+  maintainer confirmed all locally configured Idea personas and strong prose
+  prompt quality. The local encoder contains no MTP tensors, so speculative
+  decoding is unavailable for that stack.
+- Allowed MOSS-specific personas to choose either cohesive captions or ordered
+  tag sequences. The MOSS workflow contracts no longer override a tag persona
+  with a natural-language-only instruction, and refinement preserves the active
+  prompt dialect unless the user explicitly changes it.
+- Added a separate, editable MOSS negative-prompt suggestion to all four
+  workflows. A documented non-contradictory core is combined with deterministic
+  subject, anatomy, typography, style, and content-safety terms; human hand and
+  foot defects are never added to animal-only requests. Explicit Forge transfer
+  actions can replace or deduplicate-merge the visible suggestion into the
+  native negative field, while an adjacent checkbox preserves existing user
+  negatives when disabled.
+- Added an isolated text-only Anima adapter for Forge's original Qwen3-0.6B
+  encoder. It validates the exact Anima engine, tokenizer, tied embedding,
+  1024-wide final LM norm, and Forge `ModelPatcher`, then enables Forgy Chat,
+  Idea-to-Prompt, and Refine without loading another model.
+- Added a bounded real-stack Anima smoke harness. The integrated adapter uses
+  a PyTorch 2.11-compatible `no_grad` boundary, request-local FP32 KV cache,
+  zero-copy tied output projection, and a 256-token runtime ceiling. This replaces
+  the quadratic full-context decode that a visible Forgy request exposed as a
+  537-second wait.
+- Added a compact stock-Anima Forgy mode for the small base encoder. It generates
+  or refines the working prompt directly, then lets Forgy supply the response
+  markers. Common chat wrappers are normalized, copied schema placeholders and
+  malformed/repetitive model output are rejected, and an explicit quality
+  fallback preserves a real working prompt instead of accepting garbage or an
+  empty result. Real RTX 5090 new-prompt and refinement smokes each completed in
+  about 5.2 seconds with 128 generated tokens and parseable prompt updates.
+- Added a non-persistent Anima text-provider selector. The original 0.6B encoder
+  remains the default; the experimental Qwen3.5 option reuses exactly one model
+  already cached and Forge-managed by `sd-forge-qwen-35-encoder`, never invokes
+  its loader, never persists another model reference, and fails closed for a
+  missing or ambiguous cache.
+- Fixed live Qwen3.5 provider discovery for Forge's `.py`-suffixed script-module
+  names. A real ScriptRunner registry probe now reaches the expected uncached
+  provider state, and the complete cached-provider smoke still passes. Also made
+  the causal-tail preparation utility safe when Forge scans extension scripts.
+- Added bounded, provenance-carrying extractors for the exact official
+  Qwen3.5-4B final RMSNorm and missing layer-31 post-attention norm/MLP from
+  pinned revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`. No full official
+  shard is downloaded and the five supplemental tensors remain request-local.
+- Added an Apache-2.0-attributed official Qwen3.5 causal runtime over the cached
+  third-party backbone, correcting RMSNorm parameterization, Gated DeltaNet
+  head layout and recurrence, partial RoPE, attention gating, and the omitted
+  final MLP. A real isolated four-token smoke decoded `A close-up of`; a full
+  Anima/provider smoke completed 320 input and 8 output tokens with the visible
+  prefix `A wide cinematic composition featuring a red`.
+- Added an off-by-default, non-persistent Qwen thinking diagnostic. When
+  explicitly enabled, Forgy selects the thinking prompt contract and shows the
+  complete decoded generated text in a separate per-workflow field while
+  keeping the normal prompt result filtered and usable.
+- Extended reasoning filtering for Qwen templates that prefill the opening
+  `<think>` token, where generated output contains reasoning followed only by a
+  closing `</think>` marker.
+
 ## 0.5.2-beta.3 - 2026-10-08
 
 - Restored Forgy text and KREA2 vision prompt generation after Forge Neo 2.29.2
@@ -244,7 +329,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.3...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.6.0-alpha.2...HEAD
+[0.6.0-alpha.2]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.3...v0.6.0-alpha.2
 [0.5.2-beta.3]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.2...v0.5.2-beta.3
 [0.5.2-beta.2]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...v0.5.2-beta.2
 [0.5.2-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...v0.5.2-beta.1

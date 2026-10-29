@@ -16,6 +16,7 @@ from .base import (
     engine_component_matches,
 )
 from .qwen import (
+    apply_model_thinking_mode,
     decode_generated_text,
     repetition_loop_suffix,
     strip_model_thinking,
@@ -246,6 +247,7 @@ class ZImageAdapter:
         *,
         workflow: Workflow = Workflow.IDEA_TO_PROMPT,
         validate_system_prompt: Callable[..., str],
+        show_model_thinking: bool = False,
     ) -> str:
         template = getattr(engine, "llama_template", None)
         if not isinstance(template, str) or template.count("{}") != 1:
@@ -270,7 +272,7 @@ class ZImageAdapter:
         rendered = template.format(user_message)
         if system_prompt:
             rendered = f"{QWEN_SYSTEM_START}{system_prompt}{QWEN_MESSAGE_END}{rendered}"
-        return rendered + "<think>\n\n</think>\n\n"
+        return apply_model_thinking_mode(rendered, enabled=show_model_thinking)
 
     @staticmethod
     def decode_generated_text(tokenizer, generated_ids) -> str:

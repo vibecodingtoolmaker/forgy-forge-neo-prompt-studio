@@ -21,6 +21,7 @@ from ..capabilities import (
     Workflow,
 )
 from .qwen import (
+    apply_model_thinking_mode,
     decode_generated_text,
     repetition_loop_suffix,
     strip_model_thinking,
@@ -205,6 +206,7 @@ class Krea2Adapter:
         *,
         workflow: Workflow = Workflow.IDEA_TO_PROMPT,
         validate_system_prompt: Callable[..., str],
+        show_model_thinking: bool = False,
     ) -> str:
         """Apply the exact Qwen3-VL chat template used by the KREA2 adapter."""
 
@@ -230,7 +232,7 @@ class Krea2Adapter:
         system_start = rendered.index(CHAT_SYSTEM_START) + len(CHAT_SYSTEM_START)
         system_end = rendered.index(CHAT_USER_BOUNDARY, system_start)
         rendered = rendered[:system_start] + system_prompt + rendered[system_end:]
-        return rendered + "<think>\n\n</think>\n\n"
+        return apply_model_thinking_mode(rendered, enabled=show_model_thinking)
 
     def render_image_generation_prompt(
         self,
@@ -240,6 +242,7 @@ class Krea2Adapter:
         *,
         default_image_request: str,
         validate_system_prompt: Callable[..., str],
+        show_model_thinking: bool = False,
     ) -> str:
         """Insert the KREA2 vision marker into the validated user request."""
 
@@ -258,6 +261,7 @@ class Krea2Adapter:
             system_prompt,
             workflow=Workflow.IMAGE_TO_PROMPT,
             validate_system_prompt=validate_system_prompt,
+            show_model_thinking=show_model_thinking,
         )
 
     @staticmethod

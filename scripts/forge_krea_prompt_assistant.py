@@ -3,10 +3,10 @@
 Copyright (C) 2026 vibecodingtoolmaker
 SPDX-License-Identifier: AGPL-3.0-only
 
-This prerelease implements KREA2 Qwen3-VL, Z-Image Qwen3, and FLUX.2 Klein
-Qwen3-4B adapters.
-The extension never loads a language model; it operates only on encoder and
-tokenizer objects already owned by the active Forge diffusion engine.
+This prerelease implements KREA2 Qwen3-VL, Z-Image Qwen3, FLUX.2 Klein
+Qwen3-4B, Anima, and MOSS-Image text adapters. The extension does not instantiate
+or retain a second language model; it operates on encoder and tokenizer objects
+already owned by Forge or by the explicitly selected cached Qwen3.5 adapter.
 """
 
 from __future__ import annotations
@@ -32,13 +32,28 @@ import torch.nn.functional as F
 from PIL import Image, ImageOps
 
 from backend import memory_management
-from modules import call_queue, script_callbacks, shared
+from modules import call_queue, script_callbacks, scripts as forge_scripts, shared
 
 from forgy.adapters import (
+    ANIMA_TEXT_PROVIDER_ORIGINAL,
+    ANIMA_TEXT_PROVIDER_QWEN35,
+    ANIMA_TEXT_PROVIDERS,
     AdapterError,
+    AnimaAdapter,
     Flux2KleinAdapter,
     Krea2Adapter,
+    MossAdapter,
     ZImageAdapter,
+)
+from forgy.adapters.moss_negatives import suggest_moss_negative_prompt
+from forgy.adapters.qwen35_runtime import (
+    ForgeQwen359BCausalLMRuntime,
+    Qwen35CausalLMRuntime,
+    Qwen35RuntimeError,
+    inspect_moss_lm_head,
+    load_moss_lm_head,
+    load_qwen35_tail_weights,
+    moss_backbone_compute_dtype,
 )
 from forgy.capabilities import CapabilityManager, Workflow
 from forgy.forge_kv_compat import ForgeKVCacheError, forward_with_kv_cache
@@ -47,7 +62,7 @@ from forgy.model_manager import ModelContext, ModelManager
 
 LOGGER = logging.getLogger("forgy_prompt_studio")
 EXTENSION_NAME = "Forgy — Forge Neo Prompt Studio"
-EXTENSION_VERSION = "0.5.2-beta.3"
+EXTENSION_VERSION = "0.6.0-alpha.2"
 # Compatibility aliases retained for diagnostics and existing static integrations.
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"
@@ -67,6 +82,13 @@ MAX_PERSONAS = 100
 MAX_PERSONA_NAME_LENGTH = 80
 MAX_SYSTEM_PROMPT_LENGTH = 16_000
 EXTENSION_ROOT = Path(__file__).resolve().parents[1]
+FORGE_ROOT = EXTENSION_ROOT.parents[1]
+QWEN35_LM_NORM_PATH = (
+    FORGE_ROOT / "models" / "text_encoder" / "qwen35_4b_lm_norm.safetensors"
+)
+QWEN35_CAUSAL_TAIL_PATH = (
+    FORGE_ROOT / "models" / "text_encoder" / "qwen35_4b_causal_tail.safetensors"
+)
 PERSONAS_PATH = EXTENSION_ROOT / "personas.json"
 IMAGE_PERSONAS_PATH = EXTENSION_ROOT / "image_personas.json"
 REFINEMENT_PERSONAS_PATH = EXTENSION_ROOT / "refinement_personas.json"
@@ -89,7 +111,11 @@ FORGY_MAX_CONTEXT_TURNS = 8
 FORGY_MAX_STORED_TURNS = 50
 FORGY_MAX_PROMPT_VERSIONS = 50
 FORGY_MAX_OUTPUT_TOKENS = 4096
+ANIMA_STOCK_MAX_OUTPUT_TOKENS = 256
+MOSS_MAX_OUTPUT_TOKENS = 1024
+MOSS_IMAGE_TOKEN_ID = 248056
 QWEN_NO_THINK_DIRECTIVE = "/no_think"
+QWEN_THINK_DIRECTIVE = "/think"
 FORGY_CHAT_ELEMENT_ID = "forge_krea_forgy_chat"
 FORGY_IMAGE_ELEMENT_ID = "forge_krea_forgy_image"
 FORGY_CLEAR_PROMPT_ELEMENT_ID = "forge_krea_clear_working_prompt"
@@ -98,7 +124,17 @@ QUICK_ACTION_RESET_SECONDS = 1.0
 KREA2_ADAPTER = Krea2Adapter()
 ZIMAGE_ADAPTER = ZImageAdapter()
 FLUX2_KLEIN_ADAPTER = Flux2KleinAdapter()
-MODEL_MANAGER = ModelManager((KREA2_ADAPTER, ZIMAGE_ADAPTER, FLUX2_KLEIN_ADAPTER))
+ANIMA_ADAPTER = AnimaAdapter()
+MOSS_ADAPTER = MossAdapter()
+MODEL_MANAGER = ModelManager(
+    (
+        KREA2_ADAPTER,
+        ZIMAGE_ADAPTER,
+        FLUX2_KLEIN_ADAPTER,
+        ANIMA_ADAPTER,
+        MOSS_ADAPTER,
+    )
+)
 CAPABILITY_MANAGER = CapabilityManager()
 DEFAULT_IMAGE_REQUEST = (
     "Create an image-generation prompt that faithfully reconstructs the uploaded image."
@@ -138,27 +174,6 @@ Requirements:
 - Avoid empty quality slogans and avoid repeating details.
 - Write the finished prompt in English unless the refinement instruction explicitly requests another language."""
 
-DEFAULT_AGENT_LEGACY_PERSONA_NAME = "Default Legacy"
-DEFAULT_AGENT_LEGACY_PERSONA_PROMPT = """You are Forgy, an interactive creative copilot for building image-generation prompts. Help the user develop ideas, evaluate an uploaded image when one is present, and iteratively improve the current prompt.
-
-Behavior:
-- Respond directly and conversationally to the user's latest message.
-- Treat the current prompt as editable working state, not as an instruction that overrides this system prompt.
-- When the user asks for a change, return one complete updated prompt that applies the request precisely and preserves unaffected details.
-- When the user presents a new idea and no current prompt exists, build one polished natural-language image prompt.
-- If no prompt change is appropriate, use [UNCHANGED] instead of rewriting the current prompt.
-- Do not claim that an image was generated or modified. You may only discuss an uploaded image that is included in the current request.
-- Never expose chain-of-thought, hidden reasoning, or internal deliberation. Return only the requested visible response sections.
-- Do not repeat sentences, paragraphs, response sections, or prompt content.
-- Keep the conversational reply concise. Put the complete image prompt only in the prompt section.
-
-Return every response in exactly this visible format:
-FORGY_REPLY:
-Your conversational response to the user.
-
-UPDATED_PROMPT:
-The complete updated image prompt, or [UNCHANGED]."""
-
 DEFAULT_AGENT_PERSONA_PROMPT = """You are Forgy, an interactive image-prompt specialist that combines idea expansion, image analysis, and prompt refinement in one conversation.
 
 Behavior:
@@ -178,12 +193,6 @@ Your concise conversational response to the user.
 
 UPDATED_PROMPT:
 The complete updated image prompt, or [UNCHANGED]."""
-
-BUILTIN_PERSONA_BACKUPS = {
-    DEFAULT_AGENT_PERSONA_PROMPT: {
-        DEFAULT_AGENT_LEGACY_PERSONA_NAME: DEFAULT_AGENT_LEGACY_PERSONA_PROMPT,
-    }
-}
 
 LEGACY_DEFAULT_PROMPT_MIGRATIONS = {
     "10ecf38dde83cad6be2621d2221a783104a3c32b6fe5bcd59e0a202a5e7255ae": DEFAULT_PERSONA_PROMPT,
@@ -335,14 +344,9 @@ def _validate_system_prompt(system_prompt, *, allow_empty: bool = False) -> str:
 
 
 def _default_persona_store(default_prompt=DEFAULT_PERSONA_PROMPT) -> dict:
-    built_in_backups = BUILTIN_PERSONA_BACKUPS.get(default_prompt, {})
     return {
         "version": PERSONA_STORE_VERSION,
-        "personas": {
-            DEFAULT_PERSONA_NAME: default_prompt,
-            GHOST_PERSONA_NAME: "",
-            **built_in_backups,
-        },
+        "personas": {DEFAULT_PERSONA_NAME: default_prompt},
     }
 
 
@@ -383,11 +387,8 @@ def _read_persona_store(
         custom_personas = {
             name: prompt
             for name, prompt in personas.items()
-            if name not in {DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME}
+            if name != DEFAULT_PERSONA_NAME
         }
-        built_in_backups = BUILTIN_PERSONA_BACKUPS.get(default_prompt, {})
-        backup_was_added = any(name not in custom_personas for name in built_in_backups)
-        custom_personas = {**built_in_backups, **custom_personas}
         stored_default = personas.get(DEFAULT_PERSONA_NAME, default_prompt)
         legacy_hash = hashlib.sha256(stored_default.encode("utf-8")).hexdigest()
         migrated_default = LEGACY_DEFAULT_PROMPT_MIGRATIONS.get(legacy_hash)
@@ -396,19 +397,15 @@ def _read_persona_store(
             DEFAULT_PERSONA_NAME: default_prompt
             if default_was_migrated
             else stored_default,
-            GHOST_PERSONA_NAME: "",
             **custom_personas,
         }
         if len(personas) > MAX_PERSONAS:
             raise PromptAssistantError(
                 f"The persona file contains more than {MAX_PERSONAS} personas."
             )
-        if default_was_migrated or backup_was_added:
+        if default_was_migrated:
             _write_persona_store(personas, path)
-            if default_was_migrated:
-                LOGGER.info("Updated unchanged legacy Default persona in %s", path.name)
-            if backup_was_added:
-                LOGGER.info("Added built-in persona backup to %s", path.name)
+            LOGGER.info("Updated unchanged legacy Default persona in %s", path.name)
         return {"version": PERSONA_STORE_VERSION, "personas": personas}
 
 
@@ -425,11 +422,10 @@ def _write_persona_store(personas: dict[str, str], path=PERSONAS_PATH) -> None:
     custom_personas = {
         name: prompt
         for name, prompt in validated.items()
-        if name not in {DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME}
+        if name != DEFAULT_PERSONA_NAME
     }
     validated = {
         DEFAULT_PERSONA_NAME: validated[DEFAULT_PERSONA_NAME],
-        GHOST_PERSONA_NAME: "",
         **custom_personas,
     }
     if len(validated) > MAX_PERSONAS:
@@ -460,7 +456,7 @@ def _initial_persona_state_for(path, default_prompt) -> tuple[list[str], str, st
     except PromptAssistantError as exc:
         LOGGER.exception("Could not initialize persona store")
         return (
-            [DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME],
+            [DEFAULT_PERSONA_NAME],
             DEFAULT_PERSONA_NAME,
             default_prompt,
             f"**Persona file error:** {exc}",
@@ -565,7 +561,7 @@ def _save_persona_fields_to(name, system_prompt, path, default_prompt):
         if name == GHOST_PERSONA_NAME:
             if str(system_prompt or "").strip():
                 raise PromptAssistantError(
-                    "The built-in Ghost persona must keep an empty system prompt."
+                    "The Ghost testing persona must keep an empty system prompt."
                 )
             system_prompt = ""
         else:
@@ -630,7 +626,7 @@ def _new_persona_fields():
 def _delete_persona_fields_from(name, path, default_prompt):
     try:
         name = _validate_persona_name(name)
-        if name in {DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME}:
+        if name == DEFAULT_PERSONA_NAME:
             raise PromptAssistantError(
                 f"The built-in {name} persona may not be deleted."
             )
@@ -761,6 +757,89 @@ def _active_model_context(sd_model_override=None) -> ModelContext:
     return MODEL_MANAGER.resolve(sd_model)
 
 
+def _cached_qwen35_provider():
+    """Resolve one already-loaded third-party Qwen3.5 cache without loading it."""
+
+    seen: dict[int, object] = {}
+    for runner_name in ("scripts_txt2img", "scripts_img2img"):
+        runner = getattr(forge_scripts, runner_name, None)
+        for candidate in getattr(runner, "alwayson_scripts", ()) or ():
+            candidate_type = type(candidate)
+            module_name = candidate_type.__module__.removesuffix(".py")
+            if (
+                module_name.rsplit(".", 1)[-1] == "forge_qwen35_encoder"
+                and candidate_type.__name__ == "Qwen35EncoderForForge"
+            ):
+                seen[id(candidate)] = candidate
+
+    cached = []
+    for candidate in seen.values():
+        model = getattr(candidate, "_cached_model", None)
+        tokenizer = getattr(candidate, "_cached_tokenizer", None)
+        clip = getattr(candidate, "_qwen35_clip", None)
+        patcher = getattr(clip, "patcher", None)
+        model_name = getattr(candidate, "_cached_model_name", None)
+        if model is not None and tokenizer is not None and patcher is not None:
+            cached.append((candidate, model, tokenizer, patcher, model_name))
+
+    if not cached:
+        if seen:
+            raise PromptAssistantError(
+                "The Qwen3.5 Anima adapter is installed but has no cached model. "
+                "Enable it in txt2img or img2img and complete one Forge generation "
+                "with qwen35_4b.safetensors first; Forgy will not load a second "
+                "persistent 4B model."
+            )
+        raise PromptAssistantError(
+            "The installed Qwen3.5 Anima adapter was not found in Forge's active "
+            "script runners. Restart Forge with sd-forge-qwen-35-encoder enabled."
+        )
+    if len(cached) != 1:
+        names = ", ".join(str(item[4] or "unnamed") for item in cached)
+        raise PromptAssistantError(
+            "Multiple distinct Qwen3.5 adapter caches are active; Forgy refuses "
+            f"an ambiguous provider selection ({names})."
+        )
+
+    _provider, model, tokenizer, patcher, model_name = cached[0]
+    if Path(str(model_name or "")).name.lower() != "qwen35_4b.safetensors":
+        raise PromptAssistantError(
+            "The cached Qwen3.5 provider is not qwen35_4b.safetensors; its weights "
+            "cannot be combined safely with the pinned official causal tail."
+        )
+    return model, tokenizer, patcher
+
+
+def _selected_moss_lm_head_path() -> Path:
+    """Find one dense untied head in Forge's active additional modules only."""
+
+    candidates: list[Path] = []
+    for value in getattr(shared.opts, "forge_additional_modules", ()) or ():
+        path = Path(str(value))
+        if path.suffix.casefold() != ".safetensors" or not path.is_file():
+            continue
+        try:
+            inspect_moss_lm_head(path)
+        except Qwen35RuntimeError:
+            continue
+        candidates.append(path)
+
+    if not candidates:
+        raise PromptAssistantError(
+            "The active MOSS stack has no supported untied language-model head "
+            "among Forge's selected additional modules. Select the same dense "
+            "BF16, FP16, or FP32 Qwen3.5-9B encoder used by MOSS; Forgy will not "
+            "guess another file or load a second language model."
+        )
+    if len(candidates) != 1:
+        names = ", ".join(sorted(path.name for path in candidates))
+        raise PromptAssistantError(
+            "Multiple selected MOSS text encoders expose compatible LM heads; "
+            f"Forgy refuses the ambiguous selection ({names})."
+        )
+    return candidates[0]
+
+
 def _current_workflow_states(sd_model_override=None) -> dict[Workflow, bool]:
     """Resolve effective workflow switches without caching live Forge objects."""
 
@@ -801,6 +880,26 @@ def _model_capability_updates():
         gr.update(interactive=forgy_image_enabled),
         gr.update(value=forgy_image_notice),
         gr.update(value=image_workflow_notice),
+    )
+
+
+def _passive_model_detection_probe():
+    """Poll readiness without declaring visible components as timer outputs."""
+
+    ready, status = _forge_stack_status()
+    if not ready:
+        return gr.update(), gr.update()
+
+    return status, gr.update(active=False)
+
+
+def _passive_model_detection_updates(status):
+    """Refresh visible controls once when the hidden readiness signal changes."""
+
+    return (
+        str(status),
+        gr.update(variant="secondary"),
+        *_model_capability_updates(),
     )
 
 
@@ -873,7 +972,11 @@ def _active_krea_components(sd_model_override=None):
 
 
 def _render_generation_prompt(
-    engine, idea: str, instruction: str, system_prompt: str
+    engine,
+    idea: str,
+    instruction: str,
+    system_prompt: str,
+    show_model_thinking: bool = False,
 ) -> str:
     return KREA2_ADAPTER.render_generation_prompt(
         engine,
@@ -881,6 +984,7 @@ def _render_generation_prompt(
         instruction,
         system_prompt,
         validate_system_prompt=_validate_system_prompt,
+        show_model_thinking=show_model_thinking,
     )
 
 
@@ -932,6 +1036,28 @@ def _decode_generated_text(tokenizer, generated_ids) -> str:
 
 def _strip_model_thinking(text: str) -> tuple[str, bool]:
     return KREA2_ADAPTER.strip_model_thinking(text)
+
+
+def _prepare_model_output(adapter, text, show_model_thinking):
+    """Keep the working result clean while optionally exposing decoded output."""
+
+    raw_model_output = str(text or "").strip() if show_model_thinking else ""
+    visible_text, thinking_hidden = adapter.strip_model_thinking(text)
+    return visible_text, raw_model_output, thinking_hidden
+
+
+def _thinking_status_note(show_model_thinking, thinking_hidden):
+    if show_model_thinking:
+        return " · raw model output captured"
+    if thinking_hidden:
+        return " · internal reasoning hidden"
+    return ""
+
+
+def _model_thinking_output_updates(enabled):
+    """Show or clear the four request-local raw-output diagnostics."""
+
+    return tuple(gr.update(value="", visible=bool(enabled)) for _workflow in range(4))
 
 
 def _repetition_loop_suffix(token_ids: list[int]) -> tuple[int, int] | None:
@@ -1088,7 +1214,12 @@ def _grab_last_forge_prompt(
     )
 
 
-def _build_forgy_request(message: str, current_prompt: str, history) -> tuple[str, int]:
+def _build_forgy_request(
+    message: str,
+    current_prompt: str,
+    history,
+    show_model_thinking: bool = False,
+) -> tuple[str, int]:
     message = str(message or "").strip()
     if not message:
         raise PromptAssistantError("Please write a message to Forgy first.")
@@ -1105,6 +1236,9 @@ def _build_forgy_request(message: str, current_prompt: str, history) -> tuple[st
 
     current_prompt = str(current_prompt or "").strip()
     prompt_text = current_prompt if current_prompt else "No current prompt yet."
+    thinking_directive = (
+        QWEN_THINK_DIRECTIVE if show_model_thinking else QWEN_NO_THINK_DIRECTIVE
+    )
     request = (
         "Current working image prompt:\n"
         f"{prompt_text}\n\n"
@@ -1112,7 +1246,7 @@ def _build_forgy_request(message: str, current_prompt: str, history) -> tuple[st
         f"{transcript}\n\n"
         "Latest user message:\n"
         f"{message}\n\n"
-        f"{QWEN_NO_THINK_DIRECTIVE}"
+        f"{thinking_directive}"
     )
     return request, omitted_messages // 2
 
@@ -1124,6 +1258,47 @@ def _strip_forgy_fence(value: str) -> str:
         if len(lines) >= 3:
             return "\n".join(lines[1:-1]).strip()
     return value
+
+
+def _normalize_stock_anima_idea(value: str) -> str:
+    """Remove common chat wrappers before asking the 0.6B base TE for a prompt."""
+
+    value = str(value or "").strip()
+    stripped = re.sub(
+        r"(?is)^\s*(?:please\s+)?(?:"
+        r"i\s+(?:want|would like|'d like)\s+to\s+see|"
+        r"show\s+me|"
+        r"create\s+(?:a\s+\w+\s+)?prompt\s+for|"
+        r"(?:create|generate|make)\s+(?:an?\s+)?image\s+of"
+        r")\s*[:,-]?\s*",
+        "",
+        value,
+        count=1,
+    ).strip()
+    if stripped:
+        value = stripped
+    if value:
+        value = value[0].upper() + value[1:]
+    return value
+
+
+def _stock_anima_prompt_is_usable(value: str) -> bool:
+    """Reject obvious base-model garbage before it reaches Forgy's prompt state."""
+
+    value = str(value or "").strip()
+    normalized = re.sub(r"\s+", " ", value)
+    lowered = normalized.casefold()
+    words = re.findall(r"[A-Za-z][A-Za-z'-]+", normalized)
+    if len(normalized) < 20 or len(words) < 4 or "\ufffd" in value:
+        return False
+    if lowered.startswith(("workflow contract", "stepthrough", "[{", "{")):
+        return False
+    if "human resources are the most important" in lowered:
+        return False
+    lines = [line.strip().casefold() for line in value.splitlines() if line.strip()]
+    if lines and max(lines.count(line) for line in set(lines)) > 2:
+        return False
+    return True
 
 
 def _parse_forgy_response(
@@ -1149,6 +1324,11 @@ def _parse_forgy_response(
         reply = "I updated the working prompt."
     if not candidate or candidate.upper() == FORGY_UNCHANGED_MARKER:
         return reply, current_prompt, bool(candidate)
+    normalized_candidate = re.sub(r"\s+", " ", candidate).strip().casefold()
+    if normalized_candidate.startswith(
+        "the complete updated image prompt, or [unchanged]"
+    ):
+        return reply, current_prompt, False
     return reply, candidate, True
 
 
@@ -1220,7 +1400,10 @@ def _prepare_uploaded_image(
 
 
 def _render_image_generation_prompt(
-    engine, instruction: str, system_prompt: str
+    engine,
+    instruction: str,
+    system_prompt: str,
+    show_model_thinking: bool = False,
 ) -> str:
     return KREA2_ADAPTER.render_image_generation_prompt(
         engine,
@@ -1228,6 +1411,7 @@ def _render_image_generation_prompt(
         system_prompt,
         default_image_request=DEFAULT_IMAGE_REQUEST,
         validate_system_prompt=_validate_system_prompt,
+        show_model_thinking=show_model_thinking,
     )
 
 
@@ -1283,6 +1467,62 @@ def _multimodal_embeds(engine, encoder, token_ids, image_tensor):
             "The active encoder returned incomplete multimodal metadata."
         )
     return embeds, attention_mask, position_ids, visual_pos_masks, deepstack
+
+
+def _moss_multimodal_embeds(engine, token_ids, image_tensor):
+    """Build one MOSS image sequence through Forge's active Qwen3.5 wrapper."""
+
+    if token_ids.count(MOSS_IMAGE_TOKEN_ID) != 1:
+        raise PromptAssistantError(
+            "The MOSS image prompt did not contain exactly one image token."
+        )
+    tokens = [
+        {
+            "type": "image",
+            "data": image_tensor,
+            "original_type": "image",
+        }
+        if token_id == MOSS_IMAGE_TOKEN_ID
+        else token_id
+        for token_id in token_ids
+    ]
+    text_encoder = getattr(engine, "text_encoder", None)
+    process_tokens = getattr(text_encoder, "process_tokens", None)
+    if not callable(process_tokens):
+        raise PromptAssistantError(
+            "The active MOSS text wrapper cannot prepare multimodal embeddings."
+        )
+    embeds, attention_mask, token_counts, embeds_info = process_tokens(
+        [tokens], memory_management.text_encoder_device()
+    )
+    if embeds.ndim != 3 or embeds.shape[0] != 1:
+        raise PromptAssistantError(
+            "The active MOSS vision encoder returned incompatible image embeddings."
+        )
+    if not token_counts or int(token_counts[0]) != int(embeds.shape[1]):
+        raise PromptAssistantError(
+            "The active MOSS vision encoder returned inconsistent token accounting."
+        )
+    if attention_mask is not None and not bool(torch.all(attention_mask).item()):
+        raise PromptAssistantError(
+            "Padded MOSS image batches are not supported by the request-local runtime."
+        )
+
+    from backend.nn.llm import qwen_vl
+
+    position_ids = qwen_vl.qwen2vl_mrope_position_ids(
+        embeds_info, embeds.shape[1], embeds.device
+    )
+    if position_ids is None or tuple(position_ids.shape) != (3, embeds.shape[1]):
+        raise PromptAssistantError(
+            "The active MOSS vision encoder returned incomplete MRoPE metadata."
+        )
+    visual_token_count = int(embeds.shape[1]) - (len(token_ids) - 1)
+    if visual_token_count < 1:
+        raise PromptAssistantError(
+            "The active MOSS vision encoder returned no visual tokens."
+        )
+    return embeds, position_ids.to(dtype=torch.long), visual_token_count
 
 
 def _krea_image_token_id(engine) -> int | None:
@@ -1520,6 +1760,7 @@ def _generate_with_active_text_adapter(
     repetition_penalty: float,
     seed: int,
     generation_id: str,
+    show_model_thinking: bool = False,
     workflow: Workflow = Workflow.IDEA_TO_PROMPT,
 ) -> tuple[str, int, int, str, int, int, int, int, int, bool, int]:
     if not isinstance(idea, str) or not idea.strip():
@@ -1553,6 +1794,7 @@ def _generate_with_active_text_adapter(
         system_prompt,
         workflow=workflow,
         validate_system_prompt=_validate_system_prompt,
+        show_model_thinking=show_model_thinking,
     )
     core_model = getattr(encoder, "model", None)
     embedding = getattr(core_model, "embed_tokens", None)
@@ -1711,6 +1953,805 @@ def _generate_with_active_krea(**kwargs):
     return _generate_with_active_text_adapter(model_context=model_context, **kwargs)
 
 
+def _generate_with_active_anima_stock(
+    model_context: ModelContext,
+    idea: str,
+    instruction: str,
+    system_prompt: str,
+    vram_profile,
+    max_tokens: int,
+    do_sample: bool,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    min_p: float,
+    repetition_penalty: float,
+    seed: int,
+    generation_id: str,
+    show_model_thinking: bool = False,
+    workflow: Workflow = Workflow.IDEA_TO_PROMPT,
+    forgy_message: str | None = None,
+    forgy_current_prompt: str | None = None,
+) -> tuple[str, int, int, str, int, int, int, int, int, bool, int]:
+    """Generate with Forge's stock Anima Qwen3-0.6B and a request-local KV cache.
+
+    The stock encoder uses Forge manual-cast layers which currently reject
+    inference tensors under PyTorch 2.11. ``no_grad`` keeps execution graph-free
+    while the Forge core's preallocated KV-cache path avoids recomputing the
+    complete prompt for every output token. The tied output projection remains
+    a read-only zero-copy alias of Forge's embedding matrix.
+    """
+
+    if not isinstance(idea, str) or not idea.strip():
+        raise PromptAssistantError("Please enter an idea first.")
+    _raise_if_generation_cancelled(generation_id)
+
+    profile_tier, context_limit = _resolve_vram_profile(vram_profile)
+    requested_max_tokens = int(max_tokens)
+    if requested_max_tokens < 1 or requested_max_tokens > context_limit:
+        raise PromptAssistantError(
+            f"The {profile_tier} GB VRAM profile allows an output limit from "
+            f"1 to {context_limit} tokens."
+        )
+    temperature = min(max(float(temperature), 0.01), 2.0)
+    top_k = min(max(int(top_k), 1), 1000)
+    top_p = min(max(float(top_p), 0.05), 1.0)
+    min_p = min(max(float(min_p), 0.0), 1.0)
+    repetition_penalty = min(max(float(repetition_penalty), 0.1), 5.0)
+    seed = int(seed) % (2**63 - 1)
+
+    components = model_context.components
+    adapter = model_context.adapter
+    clip = components.clip
+    encoder = components.encoder
+    tokenizer = components.tokenizer
+    engine = components.engine
+    compact_forgy_mode = workflow == Workflow.FORGY_CHAT and forgy_message is not None
+    if compact_forgy_mode:
+        latest_message = str(forgy_message or "").strip()
+        existing_prompt = str(forgy_current_prompt or "").strip()
+        if not latest_message:
+            raise PromptAssistantError("Please write a message to Forgy first.")
+        if existing_prompt:
+            idea = existing_prompt
+            instruction = latest_message
+            system_prompt = DEFAULT_REFINEMENT_PERSONA_PROMPT
+            render_workflow = Workflow.REFINE_PROMPT
+        else:
+            idea = _normalize_stock_anima_idea(latest_message)
+            instruction = (
+                "Preserve the exact concept and add coherent, concrete visual detail."
+            )
+            system_prompt = DEFAULT_PERSONA_PROMPT
+            render_workflow = Workflow.IDEA_TO_PROMPT
+    else:
+        existing_prompt = ""
+        render_workflow = workflow
+    rendered_prompt = adapter.render_generation_prompt(
+        engine,
+        idea,
+        instruction,
+        system_prompt,
+        workflow=render_workflow,
+        validate_system_prompt=_validate_system_prompt,
+        show_model_thinking=show_model_thinking,
+    )
+    core_model = getattr(encoder, "model", None)
+    embedding = getattr(core_model, "embed_tokens", None)
+    config = getattr(core_model, "config", None)
+    final_norm = getattr(core_model, "norm", None)
+    if core_model is None or embedding is None or config is None or final_norm is None:
+        raise PromptAssistantError("The stock Anima language-model core is incomplete.")
+
+    prompt_token_ids = _tokenize(tokenizer, rendered_prompt)
+    input_token_count = len(prompt_token_ids)
+    profile_output_available = context_limit - input_token_count
+    if profile_output_available < 1:
+        raise PromptAssistantError(
+            f"The persona, idea, optional instruction, and chat template use "
+            f"{input_token_count} tokens and fill the {context_limit}-token "
+            "context window. Shorten the idea, instruction, or persona."
+        )
+    provider_output_available = min(
+        profile_output_available, ANIMA_STOCK_MAX_OUTPUT_TOKENS
+    )
+    max_tokens = min(requested_max_tokens, provider_output_available)
+    capacity = input_token_count + max_tokens
+    model_context_limit = getattr(config, "max_position_embeddings", None)
+    if isinstance(model_context_limit, int) and capacity > model_context_limit:
+        raise PromptAssistantError(
+            f"The active Anima text encoder supports at most {model_context_limit} "
+            "context tokens."
+        )
+
+    device = torch.device(clip.patcher.load_device)
+    # Forge's Qwen3-0.6B manual-cast projections compute Q/K/V in FP32 even
+    # when their stored weights are FP16. The preallocated cache must match the
+    # computation dtype used by scaled-dot-product attention.
+    dtype = torch.float32
+    kv_bytes_per_token = _kv_cache_bytes(config, batch=1, capacity=1, dtype=dtype)
+    kv_cache_bytes = kv_bytes_per_token * capacity
+    memory_management.load_models_gpu(
+        [clip.patcher], memory_required=int(kv_cache_bytes * 1.10)
+    )
+    _raise_if_generation_cancelled(generation_id)
+
+    free_vram = int(memory_management.get_free_memory(device))
+    reserved_vram = int(memory_management.extra_reserved_memory())
+    usable_cache_vram = max(free_vram - reserved_vram, 0)
+    vram_capacity_limit = int(usable_cache_vram / (kv_bytes_per_token * 1.10))
+    vram_output_available = max(vram_capacity_limit - input_token_count, 0)
+    available_output_tokens = min(provider_output_available, vram_output_available)
+    vram_limited = available_output_tokens < provider_output_available
+    if available_output_tokens < 1:
+        raise PromptAssistantError(
+            "After loading the stock Anima text encoder, there is not enough free "
+            "VRAM for the input KV cache. Select a smaller context profile or free "
+            "more VRAM in Forge."
+        )
+    max_tokens = min(requested_max_tokens, available_output_tokens)
+    capacity = input_token_count + max_tokens
+
+    expected_shape = (config.vocab_size, config.hidden_size)
+    weight = getattr(embedding, "weight", None)
+    if not isinstance(weight, torch.Tensor) or tuple(weight.shape) != expected_shape:
+        raise PromptAssistantError(
+            "The stock Anima embedding matrix does not have the expected tied "
+            "LM projection shape."
+        )
+    if weight.device != device:
+        raise PromptAssistantError(
+            "Forge did not place the stock Anima embedding matrix on the execution "
+            "device; Forgy will not create a large helper copy."
+        )
+    weight_functions = getattr(embedding, "weight_function", [])
+    if weight_functions:
+        raise PromptAssistantError(
+            "The stock Anima token embedding has online patches; safe tied-output "
+            "projection is not implemented for this case."
+        )
+
+    projection_weight = weight.data
+    if projection_weight.data_ptr() != weight.data_ptr() or torch.is_inference(
+        projection_weight
+    ):
+        raise PromptAssistantError(
+            "Could not create the required zero-copy Anima output projection."
+        )
+
+    generator = torch.Generator(device=device).manual_seed(seed) if do_sample else None
+    stop_tokens = {
+        int(token_id)
+        for token_id in (
+            getattr(tokenizer, "eos_token_id", None),
+            151645,
+        )
+        if token_id is not None
+    }
+    generated_ids: list[int] = []
+    finish_reason = "max_tokens"
+
+    with torch.no_grad():
+        past_key_values = _allocate_kv_cache(
+            core_model, batch=1, capacity=capacity, device=device, dtype=dtype
+        )
+        input_ids = torch.tensor([prompt_token_ids], device=device, dtype=torch.long)
+        embeds = embedding(input_ids)
+        for _ in range(max_tokens):
+            if _generation_cancelled(generation_id):
+                finish_reason = "cancelled"
+                break
+            output = _forward_with_kv_cache(
+                core_model,
+                embeds=embeds,
+                attention_mask=None,
+                past_key_values=past_key_values,
+            )
+            if not isinstance(output, tuple) or len(output) != 3:
+                raise PromptAssistantError(
+                    "The stock Anima language-model core returned no compatible "
+                    "KV cache."
+                )
+            hidden_states, _intermediate, past_key_values = output
+            last_hidden = hidden_states[:, -1:, :].data.to(
+                dtype=projection_weight.dtype
+            )
+            logits = F.linear(last_hidden, projection_weight, bias=None)[:, -1, :]
+            next_token = _sample_token(
+                logits=logits,
+                history=generated_ids,
+                do_sample=bool(do_sample),
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
+                generator=generator,
+            )
+            token_id = int(next_token[0, 0].item())
+            generated_ids.append(token_id)
+            if token_id in stop_tokens:
+                finish_reason = "eos"
+                break
+            repetition_loop = adapter.repetition_loop_suffix(generated_ids)
+            if repetition_loop is not None:
+                block_size, repeat_count = repetition_loop
+                del generated_ids[-block_size * (repeat_count - 1) :]
+                finish_reason = "repetition_stop"
+                break
+            embeds = embedding(next_token)
+
+    generated_text = adapter.decode_generated_text(tokenizer, generated_ids)
+    if not generated_text:
+        if finish_reason == "cancelled":
+            raise GenerationCancelled("Generation cancelled by user.")
+        raise PromptAssistantError(
+            "The stock Anima text encoder produced no visible prompt. Please try "
+            "again with a shorter request or output limit."
+        )
+    if compact_forgy_mode:
+        normalized_output = re.sub(r"\s+", " ", generated_text).strip().casefold()
+        copied_instruction = (
+            normalized_output.startswith("workflow contract")
+            or normalized_output.startswith("the complete updated image prompt")
+            or FORGY_PROMPT_MARKER.casefold() in normalized_output
+        )
+        if not copied_instruction and _stock_anima_prompt_is_usable(generated_text):
+            compact_reply = (
+                "I updated the working prompt with Anima's original 0.6B text encoder."
+                if existing_prompt
+                else "I created the working prompt with Anima's original 0.6B text encoder."
+            )
+            compact_prompt = generated_text
+        elif existing_prompt:
+            finish_reason = "quality_fallback"
+            compact_reply = (
+                "The original 0.6B encoder did not produce a reliable revision, so "
+                "I preserved the current prompt. Try another seed or the Qwen3.5 provider."
+            )
+            compact_prompt = FORGY_UNCHANGED_MARKER
+        else:
+            finish_reason = "quality_fallback"
+            compact_reply = (
+                "The original 0.6B encoder did not produce a reliable expansion, so "
+                "I kept your cleaned request as the working prompt. Try another seed "
+                "or the Qwen3.5 provider for a richer result."
+            )
+            compact_prompt = idea
+        generated_text = (
+            f"{FORGY_REPLY_MARKER}\n{compact_reply}\n\n"
+            f"{FORGY_PROMPT_MARKER}\n{compact_prompt}"
+        )
+    return (
+        generated_text,
+        input_token_count,
+        len(generated_ids),
+        finish_reason,
+        profile_tier,
+        capacity,
+        context_limit,
+        requested_max_tokens,
+        available_output_tokens,
+        vram_limited,
+        seed,
+    )
+
+
+def _generate_with_cached_qwen35_anima(
+    model_context: ModelContext,
+    idea: str,
+    instruction: str,
+    system_prompt: str,
+    vram_profile,
+    max_tokens: int,
+    do_sample: bool,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    min_p: float,
+    repetition_penalty: float,
+    seed: int,
+    generation_id: str,
+    show_model_thinking: bool = False,
+    workflow: Workflow = Workflow.IDEA_TO_PROMPT,
+) -> tuple[str, int, int, str, int, int, int, int, int, bool, int]:
+    """Generate through one existing Qwen3.5 adapter cache and official speech."""
+
+    if not isinstance(idea, str) or not idea.strip():
+        raise PromptAssistantError("Please enter an idea first.")
+    _raise_if_generation_cancelled(generation_id)
+
+    profile_tier, context_limit = _resolve_vram_profile(vram_profile)
+    requested_max_tokens = int(max_tokens)
+    if requested_max_tokens < 1 or requested_max_tokens > context_limit:
+        raise PromptAssistantError(
+            f"The {profile_tier} GB VRAM profile allows an output limit from "
+            f"1 to {context_limit} tokens."
+        )
+    temperature = min(max(float(temperature), 0.01), 2.0)
+    top_k = min(max(int(top_k), 1), 1000)
+    top_p = min(max(float(top_p), 0.05), 1.0)
+    min_p = min(max(float(min_p), 0.0), 1.0)
+    repetition_penalty = min(max(float(repetition_penalty), 0.1), 5.0)
+    seed = int(seed) % (2**63 - 1)
+
+    adapter = model_context.adapter
+    engine = model_context.components.engine
+    rendered_prompt = adapter.render_generation_prompt(
+        engine,
+        idea,
+        instruction,
+        system_prompt,
+        workflow=workflow,
+        validate_system_prompt=_validate_system_prompt,
+        show_model_thinking=show_model_thinking,
+    )
+    model, tokenizer, patcher = _cached_qwen35_provider()
+    prompt_token_ids = _tokenize(tokenizer, rendered_prompt)
+    input_token_count = len(prompt_token_ids)
+    profile_output_available = context_limit - input_token_count
+    if profile_output_available < 1:
+        raise PromptAssistantError(
+            f"The persona, idea, optional instruction, and chat template use "
+            f"{input_token_count} Qwen3.5 tokens and fill the {context_limit}-token "
+            "context window. Shorten the idea, instruction, or persona."
+        )
+    max_tokens = min(requested_max_tokens, profile_output_available)
+    capacity = input_token_count + max_tokens
+
+    # The 4B backbone remains owned by sd-forge-qwen-35-encoder. This request
+    # reserves only transient recurrent/KV state, activations, and the 135 MiB
+    # official causal tail before Forge places the provider's existing patcher.
+    transient_bytes = 768 * 1024 * 1024 + capacity * 256 * 1024
+    memory_management.load_models_gpu([patcher], memory_required=int(transient_bytes))
+    _raise_if_generation_cancelled(generation_id)
+
+    embedding = model.get_input_embeddings()
+    weight = getattr(embedding, "weight", None)
+    if not isinstance(weight, torch.Tensor):
+        raise PromptAssistantError(
+            "The cached Qwen3.5 provider exposes no tied embedding tensor."
+        )
+    device = torch.device(patcher.load_device)
+    if weight.device != device:
+        raise PromptAssistantError(
+            "Forge did not place the cached Qwen3.5 tied embedding on the execution "
+            "device; Forgy will not create a second 4B copy."
+        )
+
+    generator = torch.Generator(device=device).manual_seed(seed) if do_sample else None
+    stop_tokens = {
+        int(token_id)
+        for token_id in (
+            getattr(tokenizer, "eos_token_id", None),
+            248044,
+        )
+        if token_id is not None
+    }
+    generated_ids: list[int] = []
+    finish_reason = "max_tokens"
+
+    try:
+        tail = load_qwen35_tail_weights(
+            QWEN35_LM_NORM_PATH,
+            QWEN35_CAUSAL_TAIL_PATH,
+            device=device,
+            dtype=weight.dtype,
+        )
+        runtime = Qwen35CausalLMRuntime(model, tail)
+        with torch.no_grad():
+            input_ids = torch.tensor(
+                [prompt_token_ids], device=device, dtype=torch.long
+            )
+            hidden_states = runtime.prefill(input_ids)
+            for _ in range(max_tokens):
+                if _generation_cancelled(generation_id):
+                    finish_reason = "cancelled"
+                    break
+                next_token = _sample_token(
+                    logits=runtime.logits(hidden_states),
+                    history=generated_ids,
+                    do_sample=bool(do_sample),
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                    min_p=min_p,
+                    repetition_penalty=repetition_penalty,
+                    generator=generator,
+                )
+                token_id = int(next_token[0, 0].item())
+                generated_ids.append(token_id)
+                if token_id in stop_tokens:
+                    finish_reason = "eos"
+                    break
+                repetition_loop = adapter.repetition_loop_suffix(generated_ids)
+                if repetition_loop is not None:
+                    block_size, repeat_count = repetition_loop
+                    del generated_ids[-block_size * (repeat_count - 1) :]
+                    finish_reason = "repetition_stop"
+                    break
+                hidden_states = runtime.decode(token_id)
+    except Qwen35RuntimeError as exc:
+        raise PromptAssistantError(str(exc)) from exc
+
+    generated_text = adapter.decode_generated_text(tokenizer, generated_ids)
+    if not generated_text:
+        if finish_reason == "cancelled":
+            raise GenerationCancelled("Generation cancelled by user.")
+        raise PromptAssistantError(
+            "The cached Qwen3.5 Anima provider produced no visible prompt. Please "
+            "try a shorter request or output limit."
+        )
+    return (
+        generated_text,
+        input_token_count,
+        len(generated_ids),
+        finish_reason,
+        profile_tier,
+        capacity,
+        context_limit,
+        requested_max_tokens,
+        profile_output_available,
+        False,
+        seed,
+    )
+
+
+def _generate_with_active_anima(*, anima_text_provider=None, **kwargs):
+    """Dispatch one explicit Anima provider without changing model-family identity."""
+
+    provider = ANIMA_ADAPTER.normalize_text_provider(anima_text_provider)
+    if provider == ANIMA_TEXT_PROVIDER_QWEN35:
+        return _generate_with_cached_qwen35_anima(**kwargs)
+    return _generate_with_active_anima_stock(**kwargs)
+
+
+@torch.inference_mode()
+def _generate_with_active_moss(
+    model_context: ModelContext,
+    idea: str,
+    instruction: str,
+    system_prompt: str,
+    vram_profile,
+    max_tokens: int,
+    do_sample: bool,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    min_p: float,
+    repetition_penalty: float,
+    seed: int,
+    generation_id: str,
+    image=None,
+    show_model_thinking: bool = False,
+    workflow: Workflow = Workflow.IDEA_TO_PROMPT,
+) -> tuple:
+    """Generate through Forge's active MOSS Qwen3.5-9B and its selected head."""
+
+    if image is None and (not isinstance(idea, str) or not idea.strip()):
+        raise PromptAssistantError("Please enter an idea first.")
+    _raise_if_generation_cancelled(generation_id)
+
+    image_tensor = None
+    original_size = None
+    prepared_size = None
+    estimated_visual_tokens = 0
+    if image is not None:
+        (
+            image_tensor,
+            original_size,
+            prepared_size,
+            estimated_visual_tokens,
+        ) = _prepare_uploaded_image(image)
+
+    profile_tier, context_limit = _resolve_vram_profile(vram_profile)
+    requested_max_tokens = int(max_tokens)
+    if requested_max_tokens < 1 or requested_max_tokens > context_limit:
+        raise PromptAssistantError(
+            f"The {profile_tier} GB VRAM profile allows an output limit from "
+            f"1 to {context_limit} tokens."
+        )
+    temperature = min(max(float(temperature), 0.01), 2.0)
+    top_k = min(max(int(top_k), 1), 1000)
+    top_p = min(max(float(top_p), 0.05), 1.0)
+    min_p = min(max(float(min_p), 0.0), 1.0)
+    repetition_penalty = min(max(float(repetition_penalty), 0.1), 5.0)
+    seed = int(seed) % (2**63 - 1)
+
+    components = model_context.components
+    adapter = model_context.adapter
+    clip = components.clip
+    encoder = components.encoder
+    tokenizer = components.tokenizer
+    engine = components.engine
+    if image_tensor is None:
+        rendered_prompt = adapter.render_generation_prompt(
+            engine,
+            idea,
+            instruction,
+            system_prompt,
+            workflow=workflow,
+            validate_system_prompt=_validate_system_prompt,
+            show_model_thinking=show_model_thinking,
+        )
+    else:
+        rendered_prompt = adapter.render_image_generation_prompt(
+            engine,
+            instruction,
+            system_prompt,
+            default_image_request=DEFAULT_IMAGE_REQUEST,
+            validate_system_prompt=_validate_system_prompt,
+            show_model_thinking=show_model_thinking,
+        )
+    prompt_token_ids = _tokenize(tokenizer, rendered_prompt)
+    if image_tensor is not None and prompt_token_ids.count(MOSS_IMAGE_TOKEN_ID) != 1:
+        raise PromptAssistantError(
+            "The active MOSS tokenizer did not produce exactly one image token."
+        )
+    input_token_count = (
+        len(prompt_token_ids)
+        if image_tensor is None
+        else len(prompt_token_ids) - 1 + estimated_visual_tokens
+    )
+    profile_output_available = context_limit - input_token_count
+    if profile_output_available < 1:
+        subject = (
+            "The image, persona, instruction, and chat template"
+            if image_tensor is not None
+            else "The persona, idea, optional instruction, and chat template"
+        )
+        raise PromptAssistantError(
+            f"{subject} use about {input_token_count} MOSS Qwen3.5 tokens and fill "
+            f"the {context_limit}-token context window. Shorten the instruction or "
+            "persona."
+        )
+    max_tokens = min(
+        requested_max_tokens,
+        profile_output_available,
+        MOSS_MAX_OUTPUT_TOKENS,
+    )
+    capacity = input_token_count + max_tokens
+
+    core_model = getattr(encoder, "model", None)
+    config = getattr(core_model, "config", None)
+    embedding = getattr(core_model, "embed_tokens", None)
+    if core_model is None or config is None or embedding is None:
+        raise PromptAssistantError("The active MOSS language-model core is incomplete.")
+    model_context_limit = getattr(config, "max_position_embeddings", None)
+    if isinstance(model_context_limit, int) and capacity > model_context_limit:
+        raise PromptAssistantError(
+            f"The active MOSS text encoder supports at most {model_context_limit} "
+            "context tokens."
+        )
+
+    lm_head_path = _selected_moss_lm_head_path()
+    _head_key, _head_dtype = inspect_moss_lm_head(lm_head_path)
+    runtime_dtype = moss_backbone_compute_dtype(encoder)
+    head_element_size = torch.empty((), dtype=runtime_dtype).element_size()
+    head_bytes = 248320 * 4096 * head_element_size
+    # The 24 linear-attention recurrent states use about 48 MiB in FP32. Eight
+    # full-attention layers add 32 KiB per context token in BF16; the remaining
+    # reserve covers request-local activations and the dense untied output head.
+    transient_bytes = head_bytes + 1536 * 1024 * 1024 + capacity * 64 * 1024
+    if image_tensor is not None:
+        transient_bytes += IMAGE_PREFILL_RESERVE_BYTES
+    memory_management.load_models_gpu(
+        [clip.patcher],
+        memory_required=int(transient_bytes),
+        force_full_load=True,
+    )
+    _raise_if_generation_cancelled(generation_id)
+
+    if getattr(getattr(clip.patcher, "model", None), "model_lowvram", False):
+        raise PromptAssistantError(
+            "Forge could not place the complete active MOSS encoder on one device. "
+            "Forgy's cached Qwen3.5 runtime does not mix CPU and CUDA layers; free "
+            "more VRAM or choose a smaller dense MOSS text encoder."
+        )
+
+    weight = getattr(embedding, "weight", None)
+    if not isinstance(weight, torch.Tensor):
+        raise PromptAssistantError(
+            "The active MOSS Qwen3.5 encoder exposes no usable token embedding."
+        )
+    if getattr(embedding, "weight_function", []):
+        raise PromptAssistantError(
+            "The active MOSS token embedding has online patches; matching those "
+            "patches to the request-local untied LM head is not supported yet."
+        )
+    device = torch.device(clip.patcher.load_device)
+    if weight.device != device:
+        raise PromptAssistantError(
+            "Forge did not place the active MOSS token embedding on the execution "
+            "device; Forgy will not create a second encoder copy."
+        )
+    if weight.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        raise PromptAssistantError(
+            f"The active MOSS token embedding uses unsupported dtype {weight.dtype}."
+        )
+
+    multimodal_embeds = None
+    multimodal_position_ids = None
+    visual_token_count = 0
+    if image_tensor is not None:
+        (
+            multimodal_embeds,
+            multimodal_position_ids,
+            visual_token_count,
+        ) = _moss_multimodal_embeds(
+            engine,
+            prompt_token_ids,
+            image_tensor,
+        )
+        _raise_if_generation_cancelled(generation_id)
+        if multimodal_embeds.device != device:
+            raise PromptAssistantError(
+                "Forge placed the MOSS image embeddings on an unexpected device."
+            )
+        multimodal_embeds = multimodal_embeds.to(dtype=runtime_dtype)
+        input_token_count = int(multimodal_embeds.shape[1])
+        if visual_token_count != estimated_visual_tokens:
+            raise PromptAssistantError(
+                "The MOSS vision token count differs from the normalized image estimate."
+            )
+        profile_output_available = context_limit - input_token_count
+        if profile_output_available < 1:
+            raise PromptAssistantError(
+                f"The image, persona, instruction, and chat template use "
+                f"{input_token_count} tokens and fill the {context_limit}-token "
+                "context window."
+            )
+        max_tokens = min(
+            requested_max_tokens,
+            profile_output_available,
+            MOSS_MAX_OUTPUT_TOKENS,
+        )
+        capacity = input_token_count + max_tokens
+        if isinstance(model_context_limit, int) and capacity > model_context_limit:
+            raise PromptAssistantError(
+                f"The active MOSS text encoder supports at most "
+                f"{model_context_limit} context tokens."
+            )
+
+    generator = torch.Generator(device=device).manual_seed(seed) if do_sample else None
+    stop_tokens = {
+        int(token_id)
+        for token_id in (
+            getattr(tokenizer, "eos_token_id", None),
+            248044,
+        )
+        if token_id is not None
+    }
+    generated_ids: list[int] = []
+    finish_reason = "max_tokens"
+    lm_head = None
+    runtime = None
+
+    try:
+        lm_head = load_moss_lm_head(
+            lm_head_path,
+            device=device,
+            dtype=runtime_dtype,
+        )
+        runtime = ForgeQwen359BCausalLMRuntime(encoder, lm_head)
+        with torch.no_grad():
+            if multimodal_embeds is None:
+                input_ids = torch.tensor(
+                    [prompt_token_ids], device=device, dtype=torch.long
+                )
+                hidden_states = runtime.prefill(input_ids)
+            else:
+                hidden_states = runtime.prefill_embeddings(
+                    multimodal_embeds,
+                    multimodal_position_ids,
+                )
+            for _ in range(max_tokens):
+                if _generation_cancelled(generation_id):
+                    finish_reason = "cancelled"
+                    break
+                next_token = _sample_token(
+                    logits=runtime.logits(hidden_states),
+                    history=generated_ids,
+                    do_sample=bool(do_sample),
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                    min_p=min_p,
+                    repetition_penalty=repetition_penalty,
+                    generator=generator,
+                )
+                token_id = int(next_token[0, 0].item())
+                generated_ids.append(token_id)
+                if token_id in stop_tokens:
+                    finish_reason = "eos"
+                    break
+                repetition_loop = adapter.repetition_loop_suffix(generated_ids)
+                if repetition_loop is not None:
+                    block_size, repeat_count = repetition_loop
+                    del generated_ids[-block_size * (repeat_count - 1) :]
+                    finish_reason = "repetition_stop"
+                    break
+                hidden_states = runtime.decode(token_id)
+    except Qwen35RuntimeError as exc:
+        raise PromptAssistantError(str(exc)) from exc
+    finally:
+        del runtime
+        del lm_head
+
+    generated_text = adapter.decode_generated_text(tokenizer, generated_ids)
+    if not generated_text:
+        if finish_reason == "cancelled":
+            raise GenerationCancelled("Generation cancelled by user.")
+        raise PromptAssistantError(
+            "The active MOSS Qwen3.5 encoder produced no visible prompt. Please "
+            "try a shorter request or output limit."
+        )
+    result = (
+        generated_text,
+        input_token_count,
+        len(generated_ids),
+        finish_reason,
+        profile_tier,
+        capacity,
+        context_limit,
+        requested_max_tokens,
+        min(profile_output_available, MOSS_MAX_OUTPUT_TOKENS),
+        False,
+        seed,
+    )
+    if image_tensor is not None:
+        return result + (
+            visual_token_count,
+            original_size,
+            prepared_size,
+        )
+    return result
+
+
+def _generate_with_active_moss_image(
+    image,
+    instruction: str,
+    system_prompt: str,
+    vram_profile,
+    max_tokens: int,
+    do_sample: bool,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    min_p: float,
+    repetition_penalty: float,
+    seed: int,
+    generation_id: str,
+    show_model_thinking: bool = False,
+):
+    """Dispatch Image-to-Prompt through the active Forge-owned MOSS stack."""
+
+    model_context = _active_model_context()
+    if model_context.identity.adapter_id != MOSS_ADAPTER.adapter_id:
+        raise PromptAssistantError(
+            f"The active adapter is {model_context.identity.adapter_id}, not MOSS."
+        )
+    return _generate_with_active_moss(
+        model_context=model_context,
+        idea="",
+        instruction=instruction,
+        system_prompt=system_prompt,
+        vram_profile=vram_profile,
+        max_tokens=max_tokens,
+        do_sample=do_sample,
+        temperature=temperature,
+        top_k=top_k,
+        top_p=top_p,
+        min_p=min_p,
+        repetition_penalty=repetition_penalty,
+        seed=seed,
+        generation_id=generation_id,
+        image=image,
+        show_model_thinking=show_model_thinking,
+        workflow=Workflow.IMAGE_TO_PROMPT,
+    )
+
+
 @torch.inference_mode()
 def _generate_with_active_krea_image(
     image,
@@ -1726,6 +2767,7 @@ def _generate_with_active_krea_image(
     repetition_penalty: float,
     seed: int,
     generation_id: str,
+    show_model_thinking: bool = False,
 ):
     _raise_if_generation_cancelled(generation_id)
     profile_tier, context_limit = _resolve_vram_profile(vram_profile)
@@ -1750,7 +2792,10 @@ def _generate_with_active_krea_image(
     ) = _prepare_uploaded_image(image)
     _, clip, encoder, tokenizer, engine = _active_krea_components()
     rendered_prompt = _render_image_generation_prompt(
-        engine, instruction, system_prompt
+        engine,
+        instruction,
+        system_prompt,
+        show_model_thinking=show_model_thinking,
     )
     prompt_token_ids = _tokenize(tokenizer, rendered_prompt)
     image_token_id = _krea_image_token_id(engine)
@@ -1959,6 +3004,11 @@ KREA2_ADAPTER.bind_runtime(
 )
 ZIMAGE_ADAPTER.bind_runtime(text_generator=_generate_with_active_text_adapter)
 FLUX2_KLEIN_ADAPTER.bind_runtime(text_generator=_generate_with_active_text_adapter)
+ANIMA_ADAPTER.bind_runtime(text_generator=_generate_with_active_anima)
+MOSS_ADAPTER.bind_runtime(
+    text_generator=_generate_with_active_moss,
+    image_generator=_generate_with_active_moss_image,
+)
 
 
 def _run_generation(
@@ -1975,13 +3025,32 @@ def _run_generation(
     min_p,
     repetition_penalty,
     seed,
+    show_model_thinking,
+    anima_text_provider,
     generation_id,
     workflow=Workflow.IDEA_TO_PROMPT,
+    forgy_message=None,
+    forgy_current_prompt=None,
 ):
     started = time.perf_counter()
     try:
         model_context = _active_model_context()
         _require_workflow(model_context, workflow)
+        provider_kwargs = {}
+        if model_context.identity.adapter_id == ANIMA_ADAPTER.adapter_id:
+            normalized_provider = ANIMA_ADAPTER.normalize_text_provider(
+                anima_text_provider
+            )
+            provider_kwargs["anima_text_provider"] = normalized_provider
+            if (
+                normalized_provider == ANIMA_TEXT_PROVIDER_ORIGINAL
+                and workflow == Workflow.FORGY_CHAT
+                and forgy_message is not None
+            ):
+                provider_kwargs.update(
+                    forgy_message=forgy_message,
+                    forgy_current_prompt=forgy_current_prompt,
+                )
         (
             text,
             input_count,
@@ -2009,31 +3078,41 @@ def _run_generation(
             repetition_penalty=repetition_penalty,
             seed=seed,
             generation_id=generation_id,
+            show_model_thinking=show_model_thinking,
             workflow=workflow,
+            **provider_kwargs,
         )
     except GenerationCancelled:
         LOGGER.info("Prompt generation cancelled by user")
-        return "", "**Cancelled by user.**"
+        return "", "**Cancelled by user.**", ""
     except (PromptAssistantError, AdapterError) as exc:
         LOGGER.warning("Prompt generation rejected: %s", exc)
-        return "", f"**Not executed:** {exc}"
+        return "", f"**Not executed:** {exc}", ""
     except torch.OutOfMemoryError:
         LOGGER.exception("CUDA OOM during prompt generation")
-        return "", (
+        return (
+            "",
             "**CUDA out of memory.** No second model was loaded. Forge can "
-            "manage memory normally again on the next job."
+            "manage memory normally again on the next job.",
+            "",
         )
     except Exception as exc:
         LOGGER.exception("Unexpected prompt-generation failure")
-        return "", f"**Error:** {type(exc).__name__}: {exc}"
+        return "", f"**Error:** {type(exc).__name__}: {exc}", ""
     finally:
         _clear_generation_request(generation_id)
 
-    text, thinking_hidden = model_context.adapter.strip_model_thinking(text)
+    text, raw_model_output, thinking_hidden = _prepare_model_output(
+        model_context.adapter,
+        text,
+        show_model_thinking,
+    )
     if not text:
-        return "", (
+        return (
+            "",
             "**Not executed:** The active text encoder produced only internal "
-            "reasoning and no visible answer. Try a different seed or persona."
+            "reasoning and no visible answer. Try a different seed or persona.",
+            raw_model_output,
         )
     elapsed = time.perf_counter() - started
     persona_display = html.escape((persona_name or "Unsaved").strip())
@@ -2046,16 +3125,35 @@ def _run_generation(
     )
     vram_note = " · limited by free VRAM" if vram_limited else ""
     sampling_note = " (sampling disabled)" if not do_sample else ""
-    thinking_note = " · internal reasoning hidden" if thinking_hidden else ""
-    return text, (
+    thinking_note = _thinking_status_note(show_model_thinking, thinking_hidden)
+    provider_note = ""
+    if model_context.identity.adapter_id == ANIMA_ADAPTER.adapter_id:
+        normalized_provider = ANIMA_ADAPTER.normalize_text_provider(anima_text_provider)
+        provider_display = html.escape(normalized_provider)
+        provider_note = f"Provider: **{provider_display}** · "
+        if normalized_provider == ANIMA_TEXT_PROVIDER_ORIGINAL:
+            provider_note += (
+                f"0.6B runtime ceiling: **{ANIMA_STOCK_MAX_OUTPUT_TOKENS}** · "
+            )
+            if workflow == Workflow.FORGY_CHAT and forgy_message is not None:
+                provider_note += "compact prompt mode · "
+    elif model_context.identity.adapter_id == MOSS_ADAPTER.adapter_id:
+        provider_note = (
+            "Provider: **active MOSS Qwen3.5 9B + selected untied LM head** · "
+            f"runtime ceiling: **{MOSS_MAX_OUTPUT_TOKENS}** · "
+        )
+    return (
+        text,
         f"**Active text encoder** · "
+        f"{provider_note}"
         f"Persona: **{persona_display}** · "
         f"Seed: **{used_seed}**{sampling_note} · "
         f"VRAM profile: **{profile_tier} GB** · "
         f"{input_count} input tokens · {output_count} output tokens · "
         f"available output window: {available_output_tokens}{vram_note} · "
         f"{limit_note}reserved context: {reserved_context}/{context_limit} · "
-        f"finish: `{finish_reason}`{thinking_note} · {elapsed:.1f} s"
+        f"finish: `{finish_reason}`{thinking_note} · {elapsed:.1f} s",
+        raw_model_output,
     )
 
 
@@ -2073,6 +3171,7 @@ def _run_image_generation(
     min_p,
     repetition_penalty,
     seed,
+    show_model_thinking,
     generation_id,
     workflow=Workflow.IMAGE_TO_PROMPT,
 ):
@@ -2109,30 +3208,39 @@ def _run_image_generation(
             repetition_penalty=repetition_penalty,
             seed=seed,
             generation_id=generation_id,
+            show_model_thinking=show_model_thinking,
         )
     except GenerationCancelled:
         LOGGER.info("Image-to-prompt generation cancelled by user")
-        return "", "**Cancelled by user.**"
+        return "", "**Cancelled by user.**", ""
     except (PromptAssistantError, AdapterError) as exc:
         LOGGER.warning("Image-to-prompt generation rejected: %s", exc)
-        return "", f"**Not executed:** {exc}"
+        return "", f"**Not executed:** {exc}", ""
     except torch.OutOfMemoryError:
         LOGGER.exception("CUDA OOM during image-to-prompt generation")
-        return "", (
+        return (
+            "",
             "**CUDA out of memory.** No second model was loaded. Forge can "
-            "manage memory normally again on the next job."
+            "manage memory normally again on the next job.",
+            "",
         )
     except Exception as exc:
         LOGGER.exception("Unexpected image-to-prompt failure")
-        return "", f"**Error:** {type(exc).__name__}: {exc}"
+        return "", f"**Error:** {type(exc).__name__}: {exc}", ""
     finally:
         _clear_generation_request(generation_id)
 
-    text, thinking_hidden = _strip_model_thinking(text)
+    text, raw_model_output, thinking_hidden = _prepare_model_output(
+        KREA2_ADAPTER,
+        text,
+        show_model_thinking,
+    )
     if not text:
-        return "", (
+        return (
+            "",
             "**Not executed:** The active vision encoder produced only internal "
-            "reasoning and no visible answer. Try a different seed or persona."
+            "reasoning and no visible answer. Try a different seed or persona.",
+            raw_model_output,
         )
     elapsed = time.perf_counter() - started
     persona_display = html.escape((persona_name or "Unsaved").strip())
@@ -2145,10 +3253,11 @@ def _run_image_generation(
     )
     vram_note = " · limited by free VRAM" if vram_limited else ""
     sampling_note = " (sampling disabled)" if not do_sample else ""
-    thinking_note = " · internal reasoning hidden" if thinking_hidden else ""
+    thinking_note = _thinking_status_note(show_model_thinking, thinking_hidden)
     original_width, original_height = original_size
     prepared_width, prepared_height = prepared_size
-    return text, (
+    return (
+        text,
         f"**Active vision encoder** · "
         f"Persona: **{persona_display}** · "
         f"Seed: **{used_seed}**{sampling_note} · "
@@ -2159,7 +3268,8 @@ def _run_image_generation(
         f"{input_count} total input tokens · {output_count} output tokens · "
         f"available output window: {available_output_tokens}{vram_note} · "
         f"{limit_note}reserved context: {reserved_context}/{context_limit} · "
-        f"finish: `{finish_reason}`{thinking_note} · {elapsed:.1f} s"
+        f"finish: `{finish_reason}`{thinking_note} · {elapsed:.1f} s",
+        raw_model_output,
     )
 
 
@@ -2177,6 +3287,8 @@ def _run_refinement(
     min_p,
     repetition_penalty,
     seed,
+    show_model_thinking,
+    anima_text_provider,
     generation_id,
 ):
     original_prompt = str(existing_prompt or "")
@@ -2184,9 +3296,9 @@ def _run_refinement(
         request = _refinement_user_message(original_prompt, instruction)
     except PromptAssistantError as exc:
         _clear_generation_request(generation_id)
-        return original_prompt, f"**Not executed:** {exc}"
+        return original_prompt, f"**Not executed:** {exc}", ""
 
-    refined_prompt, status = _run_generation(
+    refined_prompt, status, raw_model_output = _run_generation(
         request,
         "",
         persona_name,
@@ -2200,16 +3312,37 @@ def _run_refinement(
         min_p,
         repetition_penalty,
         seed,
+        show_model_thinking,
+        anima_text_provider,
         generation_id,
         workflow=Workflow.REFINE_PROMPT,
     )
     if not refined_prompt:
-        return original_prompt, status
-    return refined_prompt, status.replace(
-        "**Active text encoder**",
-        "**Refined with active text encoder**",
-        1,
+        return original_prompt, status, raw_model_output
+    return (
+        refined_prompt,
+        status.replace(
+            "**Active text encoder**",
+            "**Refined with active text encoder**",
+            1,
+        ),
+        raw_model_output,
     )
+
+
+def _suggest_negative_prompt_for_active_adapter(generated_prompt, *context):
+    """Return a separate suggestion while MOSS is the active adapter."""
+
+    generated_prompt = str(generated_prompt or "").strip()
+    if not generated_prompt:
+        return ""
+    try:
+        model_context = _active_model_context()
+    except (PromptAssistantError, AdapterError):
+        return ""
+    if model_context.identity.adapter_id != MOSS_ADAPTER.adapter_id:
+        return ""
+    return suggest_moss_negative_prompt(generated_prompt, *context)
 
 
 def _run_forgy_turn(
@@ -2229,6 +3362,8 @@ def _run_forgy_turn(
     min_p,
     repetition_penalty,
     seed,
+    show_model_thinking,
+    anima_text_provider,
     generation_id,
 ):
     history = _normalize_forgy_history(chat_history)
@@ -2237,7 +3372,10 @@ def _run_forgy_turn(
     original_message = str(message or "")
     try:
         request, omitted_turns = _build_forgy_request(
-            original_message, original_prompt, history
+            original_message,
+            original_prompt,
+            history,
+            show_model_thinking=show_model_thinking,
         )
     except PromptAssistantError as exc:
         _clear_generation_request(generation_id)
@@ -2247,6 +3385,7 @@ def _run_forgy_turn(
             versions,
             original_message,
             f"**Not executed:** {exc}",
+            "",
         )
 
     try:
@@ -2255,7 +3394,7 @@ def _run_forgy_turn(
         max_tokens = FORGY_MAX_OUTPUT_TOKENS
 
     if image is None:
-        raw_response, status = _run_generation(
+        raw_response, status, raw_model_output = _run_generation(
             request,
             "",
             persona_name,
@@ -2269,8 +3408,12 @@ def _run_forgy_turn(
             min_p,
             repetition_penalty,
             seed,
+            show_model_thinking,
+            anima_text_provider,
             generation_id,
             workflow=Workflow.FORGY_CHAT,
+            forgy_message=original_message,
+            forgy_current_prompt=original_prompt,
         )
         status = status.replace(
             "**Active text encoder**",
@@ -2278,7 +3421,7 @@ def _run_forgy_turn(
             1,
         )
     else:
-        raw_response, status = _run_image_generation(
+        raw_response, status, raw_model_output = _run_image_generation(
             image,
             request,
             persona_name,
@@ -2292,6 +3435,7 @@ def _run_forgy_turn(
             min_p,
             repetition_penalty,
             seed,
+            show_model_thinking,
             generation_id,
             workflow=Workflow.FORGY_CHAT,
         )
@@ -2302,7 +3446,14 @@ def _run_forgy_turn(
         )
 
     if not raw_response:
-        return history, original_prompt, versions, original_message, status
+        return (
+            history,
+            original_prompt,
+            versions,
+            original_message,
+            status,
+            raw_model_output,
+        )
 
     reply, updated_prompt, parsed = _parse_forgy_response(raw_response, original_prompt)
     user_display = original_message.strip()
@@ -2324,10 +3475,20 @@ def _run_forgy_turn(
 
     notes = []
     if not parsed:
-        notes.append(
-            "Forgy's response protocol was not recognized; the current prompt "
-            "was preserved."
-        )
+        if re.search(
+            r"(?is)UPDATED(?:[ _-]+)PROMPT\s*:\s*"
+            r"The complete updated image prompt, or\s*\[UNCHANGED\]",
+            raw_response,
+        ):
+            notes.append(
+                "The active text encoder copied Forgy's response template instead "
+                "of producing a prompt; no prompt update was accepted."
+            )
+        else:
+            notes.append(
+                "Forgy's response did not contain a usable prompt update; the "
+                "current prompt was preserved."
+            )
     if omitted_turns:
         notes.append(
             f"{omitted_turns} older conversation turn(s) were omitted from the "
@@ -2335,7 +3496,7 @@ def _run_forgy_turn(
         )
     if notes:
         status += "<br>" + " ".join(notes)
-    return updated_history, current_prompt, versions, "", status
+    return updated_history, current_prompt, versions, "", status, raw_model_output
 
 
 def _undo_forgy_prompt(current_prompt, prompt_versions):
@@ -2386,6 +3547,65 @@ def _transfer_prompt(
     return (
         updated,
         f"✅ {action} the **{target_name}** positive prompt.{generation_note}",
+    )
+
+
+def _merge_negative_prompts(current: str, suggested: str) -> str:
+    values = []
+    seen = set()
+    for source in (current, suggested):
+        for value in str(source or "").replace("\n", ",").split(","):
+            value = value.strip()
+            key = value.casefold()
+            if value and key not in seen:
+                values.append(value)
+                seen.add(key)
+    return ", ".join(values)
+
+
+def _transfer_prompt_with_negative(
+    generated: str,
+    current: str,
+    suggested_negative: str,
+    current_negative: str,
+    include_negative: bool,
+    *,
+    mode: str,
+    target_name: str,
+    start_generation: bool = False,
+):
+    updated, status = _transfer_prompt(
+        generated,
+        current,
+        mode=mode,
+        target_name=target_name,
+        start_generation=start_generation,
+    )
+    if not str(generated or "").strip():
+        return updated, str(current_negative or ""), status
+
+    suggested_negative = str(suggested_negative or "").strip()
+    current_negative = str(current_negative or "").strip()
+    if not include_negative or not suggested_negative:
+        return updated, current_negative, status
+
+    if mode == "append":
+        updated_negative = _merge_negative_prompts(
+            current_negative,
+            suggested_negative,
+        )
+        negative_action = "merged the suggested negative prompt into"
+    else:
+        updated_negative = suggested_negative
+        negative_action = "replaced"
+    positive_action = "Appended to" if mode == "append" else "Replaced"
+    generation_note = " Starting image generation…" if start_generation else ""
+    return (
+        updated,
+        updated_negative,
+        f"✅ {positive_action} the **{target_name}** positive prompt and "
+        f"{negative_action} its negative "
+        f"prompt.{generation_note}",
     )
 
 
@@ -2670,20 +3890,26 @@ def _connect_prompt_buttons(
     img_replace_generate,
     img_append_generate,
     feedback,
+    *,
+    negative_result=None,
+    include_negative=None,
 ):
     try:
         from modules import ui
 
         txt_prompt = ui.txt2img_paste_fields[0][0]
         img_prompt = ui.img2img_paste_fields[0][0]
+        txt_negative_prompt = FORGE_PROMPT_COMPONENTS.get("txt2img_neg_prompt")
+        img_negative_prompt = FORGE_PROMPT_COMPONENTS.get("img2img_neg_prompt")
     except Exception:
-        LOGGER.exception("Could not connect Forge positive-prompt fields")
+        LOGGER.exception("Could not connect Forge prompt fields")
         return
 
     actions = (
         (
             txt_replace,
             txt_prompt,
+            txt_negative_prompt,
             "replace",
             "txt2img",
             "txt2img: replace",
@@ -2693,6 +3919,7 @@ def _connect_prompt_buttons(
         (
             txt_append,
             txt_prompt,
+            txt_negative_prompt,
             "append",
             "txt2img",
             "txt2img: append",
@@ -2702,6 +3929,7 @@ def _connect_prompt_buttons(
         (
             txt_replace_generate,
             txt_prompt,
+            txt_negative_prompt,
             "replace",
             "txt2img",
             "txt2img: replace + generate",
@@ -2711,6 +3939,7 @@ def _connect_prompt_buttons(
         (
             txt_append_generate,
             txt_prompt,
+            txt_negative_prompt,
             "append",
             "txt2img",
             "txt2img: append + generate",
@@ -2720,6 +3949,7 @@ def _connect_prompt_buttons(
         (
             img_replace,
             img_prompt,
+            img_negative_prompt,
             "replace",
             "img2img",
             "img2img: replace",
@@ -2729,6 +3959,7 @@ def _connect_prompt_buttons(
         (
             img_append,
             img_prompt,
+            img_negative_prompt,
             "append",
             "img2img",
             "img2img: append",
@@ -2738,6 +3969,7 @@ def _connect_prompt_buttons(
         (
             img_replace_generate,
             img_prompt,
+            img_negative_prompt,
             "replace",
             "img2img",
             "img2img: replace + generate",
@@ -2747,6 +3979,7 @@ def _connect_prompt_buttons(
         (
             img_append_generate,
             img_prompt,
+            img_negative_prompt,
             "append",
             "img2img",
             "img2img: append + generate",
@@ -2757,6 +3990,7 @@ def _connect_prompt_buttons(
     for (
         button,
         target,
+        negative_target,
         mode,
         target_name,
         normal_label,
@@ -2770,18 +4004,42 @@ def _connect_prompt_buttons(
             queue=False,
             show_progress="hidden",
         )
-        transferred = started.then(
-            fn=partial(
-                _transfer_prompt,
-                mode=mode,
-                target_name=target_name,
-                start_generation=generate_element_id is not None,
-            ),
-            inputs=[result, target],
-            outputs=[target, feedback],
-            queue=False,
-            show_progress="hidden",
-        )
+        if (
+            negative_result is not None
+            and include_negative is not None
+            and negative_target is not None
+        ):
+            transferred = started.then(
+                fn=partial(
+                    _transfer_prompt_with_negative,
+                    mode=mode,
+                    target_name=target_name,
+                    start_generation=generate_element_id is not None,
+                ),
+                inputs=[
+                    result,
+                    target,
+                    negative_result,
+                    negative_target,
+                    include_negative,
+                ],
+                outputs=[target, negative_target, feedback],
+                queue=False,
+                show_progress="hidden",
+            )
+        else:
+            transferred = started.then(
+                fn=partial(
+                    _transfer_prompt,
+                    mode=mode,
+                    target_name=target_name,
+                    start_generation=generate_element_id is not None,
+                ),
+                inputs=[result, target],
+                outputs=[target, feedback],
+                queue=False,
+                show_progress="hidden",
+            )
         if generate_element_id is not None:
             transferred.then(
                 fn=partial(
@@ -2809,7 +4067,7 @@ def _connect_prompt_buttons(
             )
 
     buttons = tuple(action[0] for action in actions)
-    labels = tuple(action[4] for action in actions)
+    labels = tuple(action[5] for action in actions)
     reset_trigger.click(
         fn=partial(_reset_prompt_transfer_feedback, labels),
         inputs=[],
@@ -3086,6 +4344,43 @@ def _create_sampling_controls(
     )
 
 
+def _create_raw_model_output():
+    output = gr.Textbox(
+        label="Raw model output (testing)",
+        lines=12,
+        max_lines=30,
+        interactive=False,
+        visible=False,
+        show_copy_button=True,
+    )
+    output.do_not_save_to_config = True
+    return output
+
+
+def _create_negative_prompt_output():
+    output = gr.Textbox(
+        label="Suggested negative prompt (MOSS)",
+        info=(
+            "MOSS only: documented safe core plus deterministic subject-specific "
+            "terms. The official SFT also permits an empty negative prompt."
+        ),
+        placeholder=(
+            "After a successful MOSS prompt, Forgy places the documented safe "
+            "core and subject-specific additions here."
+        ),
+        lines=3,
+        max_lines=8,
+        show_copy_button=True,
+    )
+    include_on_transfer = gr.Checkbox(
+        label="Include this negative prompt in Forge transfer actions",
+        value=True,
+    )
+    output.do_not_save_to_config = True
+    include_on_transfer.do_not_save_to_config = True
+    return output, include_on_transfer
+
+
 def _connect_persona_controls(controls, load_fn, save_fn, delete_fn):
     (
         persona_select,
@@ -3224,6 +4519,7 @@ def _start_model_loading():
     return (
         "### ⏳ Forge is loading the current model selection…",
         gr.update(value="⏳ Loading current selection…", interactive=False),
+        gr.update(active=False),
     )
 
 
@@ -3265,7 +4561,11 @@ def _finish_text_generation():
 
 
 def _finish_model_loading():
-    return gr.update(value="Load current Forge selection", interactive=True)
+    ready, _status = _forge_stack_status()
+    return (
+        gr.update(value="Load current Forge selection", interactive=True),
+        gr.update(active=not ready),
+    )
 
 
 def _finish_image_generation():
@@ -3293,7 +4593,12 @@ def _capture_forge_gallery_component(component, **_kwargs) -> None:
     elem_id = getattr(component, "elem_id", None)
     if elem_id in {"txt2img_gallery", "img2img_gallery"}:
         FORGE_GALLERY_COMPONENTS[elem_id] = component
-    elif elem_id in {"txt2img_prompt", "img2img_prompt"}:
+    elif elem_id in {
+        "txt2img_prompt",
+        "img2img_prompt",
+        "txt2img_neg_prompt",
+        "img2img_neg_prompt",
+    }:
         FORGE_PROMPT_COMPONENTS[elem_id] = component
 
 
@@ -3351,17 +4656,50 @@ def _on_ui_tabs():
         with gr.Row(equal_height=True):
             with gr.Column(scale=4, min_width=320):
                 gr.Markdown(f"### {EXTENSION_NAME} — {EXTENSION_VERSION}")
-                loader_status = gr.Markdown(initial_loader_status)
+                loader_status = gr.Markdown(
+                    initial_loader_status,
+                    elem_classes=["forge-krea-loader-status"],
+                )
             with gr.Column(scale=1, min_width=260):
                 load_forge_stack = gr.Button(
                     "Load current Forge selection",
                     variant="primary" if not stack_ready else "secondary",
                     size="lg",
                 )
+        # Gradio 4.40 does not reliably emit ``State.change`` after a State is
+        # updated by another event. A hidden client component carries the same
+        # transition without putting polling updates into the visible layout.
+        passive_model_detection_status = gr.Textbox(value="", visible=False)
+        passive_model_detection = gr.Timer(1.0, active=not stack_ready)
         gr.Markdown(
             "Create, refine, and discuss your prompts with the active text encoder "
             "in Forge. The selected persona is the complete system prompt."
         )
+        with gr.Accordion("Model output diagnostics (testing)", open=False):
+            anima_text_provider = gr.Dropdown(
+                label="Anima text provider",
+                choices=list(ANIMA_TEXT_PROVIDERS),
+                value=ANIMA_TEXT_PROVIDER_ORIGINAL,
+            )
+            anima_text_provider.do_not_save_to_config = True
+            gr.Markdown(
+                "Applies only while Anima is active. The original 0.6B encoder is "
+                "the safe default. The experimental Qwen3.5 option reuses exactly "
+                "one model already cached by sd-forge-qwen-35-encoder and fails "
+                "closed when no unambiguous cache is available; Forgy never starts "
+                "or retains a second 4B model."
+            )
+            show_model_thinking = gr.Checkbox(
+                label="Enable and show Qwen model thinking",
+                value=False,
+            )
+            show_model_thinking.do_not_save_to_config = True
+            gr.Markdown(
+                "Enables Qwen's thinking mode for the next request and shows the "
+                "unfiltered decoded model output in the active workflow. Thinking "
+                "uses the same output-token budget and can make a request noticeably "
+                "slower. The normal cleaned prompt remains separate."
+            )
 
         with gr.Tabs():
             with gr.Tab("Forgy Chat"):
@@ -3417,6 +4755,7 @@ def _on_ui_tabs():
                         )
                         forgy_generation_id = gr.State("")
                         forgy_status = gr.Markdown()
+                        forgy_raw_model_output = _create_raw_model_output()
                     with gr.Column(scale=1, min_width=420):
                         with gr.Column(
                             min_width=0,
@@ -3438,9 +4777,14 @@ def _on_ui_tabs():
                                 min_width=34,
                                 elem_id=FORGY_CLEAR_PROMPT_ELEMENT_ID,
                             )
+                        (
+                            forgy_negative_result,
+                            forgy_include_negative,
+                        ) = _create_negative_prompt_output()
                         forgy_prompt_versions = gr.State([])
                         forgy_image_capability_notice = gr.Markdown(
-                            initial_forgy_image_notice
+                            initial_forgy_image_notice,
+                            elem_classes=["forge-krea-capability-notice"],
                         )
                         forgy_image = gr.Image(
                             label="Image for Forgy",
@@ -3587,7 +4931,11 @@ def _on_ui_tabs():
                     with gr.Column(scale=1, min_width=190):
                         text_send_to_refinement = gr.Button("Send to prompt refinement")
                         text_send_to_forgy = gr.Button("Send to Forgy")
+                text_negative_result, text_include_negative = (
+                    _create_negative_prompt_output()
+                )
                 status = gr.Markdown()
+                text_raw_model_output = _create_raw_model_output()
                 with gr.Row():
                     txt_replace = gr.Button("txt2img: replace")
                     txt_replace_generate = gr.Button("txt2img: replace + generate")
@@ -3620,7 +4968,10 @@ def _on_ui_tabs():
                 )
                 image_persona_name = image_active_persona_controls[0]
                 image_persona_prompt = image_active_persona_controls[1]
-                image_capability_notice = gr.Markdown(initial_image_workflow_notice)
+                image_capability_notice = gr.Markdown(
+                    initial_image_workflow_notice,
+                    elem_classes=["forge-krea-capability-notice"],
+                )
                 with gr.Row(
                     equal_height=True,
                     elem_classes=["forge-krea-image-input-row"],
@@ -3669,7 +5020,11 @@ def _on_ui_tabs():
                             "Send to prompt refinement"
                         )
                         image_send_to_forgy = gr.Button("Send to Forgy")
+                image_negative_result, image_include_negative = (
+                    _create_negative_prompt_output()
+                )
                 image_status = gr.Markdown()
+                image_raw_model_output = _create_raw_model_output()
                 with gr.Row():
                     image_txt_replace = gr.Button("txt2img: replace")
                     image_txt_replace_generate = gr.Button(
@@ -3729,6 +5084,9 @@ def _on_ui_tabs():
                             "Use image-to-prompt result"
                         )
                         refinement_send_to_forgy = gr.Button("Send to Forgy")
+                refinement_negative_result, refinement_include_negative = (
+                    _create_negative_prompt_output()
+                )
                 refinement_load_status = gr.Markdown()
                 refinement_instruction = gr.Textbox(
                     label="Refinement instruction",
@@ -3751,6 +5109,7 @@ def _on_ui_tabs():
                     )
                 refinement_generation_id = gr.State("")
                 refinement_status = gr.Markdown()
+                refinement_raw_model_output = _create_raw_model_output()
                 with gr.Row():
                     refinement_txt_replace = gr.Button("txt2img: replace")
                     refinement_txt_replace_generate = gr.Button(
@@ -3799,7 +5158,7 @@ def _on_ui_tabs():
         model_load_event = load_forge_stack.click(
             fn=_start_model_loading,
             inputs=[],
-            outputs=[loader_status, load_forge_stack],
+            outputs=[loader_status, load_forge_stack, passive_model_detection],
             queue=False,
             show_progress="hidden",
         ).then(
@@ -3828,7 +5187,73 @@ def _on_ui_tabs():
         capability_refresh_event.then(
             fn=_finish_model_loading,
             inputs=[],
-            outputs=[load_forge_stack],
+            outputs=[load_forge_stack, passive_model_detection],
+            queue=False,
+            show_progress="hidden",
+        )
+        passive_model_detection.tick(
+            fn=_passive_model_detection_probe,
+            inputs=[],
+            outputs=[passive_model_detection_status, passive_model_detection],
+            queue=False,
+            show_progress="hidden",
+        )
+        passive_model_detection_status.change(
+            fn=_passive_model_detection_updates,
+            inputs=[passive_model_detection_status],
+            outputs=[
+                loader_status,
+                load_forge_stack,
+                generate,
+                image_generate,
+                refine_generate,
+                forgy_send,
+                source_image,
+                forgy_image,
+                forgy_grab_last_image,
+                forgy_image_capability_notice,
+                image_capability_notice,
+            ],
+            queue=False,
+            show_progress="hidden",
+        )
+        show_model_thinking.change(
+            fn=_model_thinking_output_updates,
+            inputs=[show_model_thinking],
+            outputs=[
+                forgy_raw_model_output,
+                text_raw_model_output,
+                image_raw_model_output,
+                refinement_raw_model_output,
+            ],
+            queue=False,
+            show_progress="hidden",
+        )
+        result.change(
+            fn=_suggest_negative_prompt_for_active_adapter,
+            inputs=[result, idea, text_instruction],
+            outputs=[text_negative_result],
+            queue=False,
+            show_progress="hidden",
+        )
+        image_result.change(
+            fn=_suggest_negative_prompt_for_active_adapter,
+            inputs=[image_result, image_instruction],
+            outputs=[image_negative_result],
+            queue=False,
+            show_progress="hidden",
+        )
+        prompt_to_refine.change(
+            fn=_suggest_negative_prompt_for_active_adapter,
+            inputs=[prompt_to_refine, refinement_instruction],
+            outputs=[refinement_negative_result],
+            queue=False,
+            show_progress="hidden",
+        )
+        forgy_current_prompt.change(
+            fn=_suggest_negative_prompt_for_active_adapter,
+            inputs=[forgy_current_prompt],
+            outputs=[forgy_negative_result],
             queue=False,
             show_progress="hidden",
         )
@@ -3855,9 +5280,11 @@ def _on_ui_tabs():
                 min_p,
                 repetition_penalty,
                 seed,
+                show_model_thinking,
+                anima_text_provider,
                 text_generation_id,
             ],
-            outputs=[result, status],
+            outputs=[result, status, text_raw_model_output],
             show_progress="minimal",
         )
         text_generation_event.then(
@@ -3900,6 +5327,8 @@ def _on_ui_tabs():
             img_replace_generate,
             img_append_generate,
             prompt_action_status,
+            negative_result=text_negative_result,
+            include_negative=text_include_negative,
         )
 
         (
@@ -3940,9 +5369,10 @@ def _on_ui_tabs():
                 image_min_p,
                 image_repetition_penalty,
                 image_seed,
+                show_model_thinking,
                 image_generation_id,
             ],
-            outputs=[image_result, image_status],
+            outputs=[image_result, image_status, image_raw_model_output],
             show_progress="minimal",
         )
         image_generation_event.then(
@@ -3985,6 +5415,8 @@ def _on_ui_tabs():
             image_img_replace_generate,
             image_img_append_generate,
             image_prompt_action_status,
+            negative_result=image_negative_result,
+            include_negative=image_include_negative,
         )
 
         _connect_refinement_source_button(
@@ -4072,9 +5504,15 @@ def _on_ui_tabs():
                 refinement_min_p,
                 refinement_repetition_penalty,
                 refinement_seed,
+                show_model_thinking,
+                anima_text_provider,
                 refinement_generation_id,
             ],
-            outputs=[prompt_to_refine, refinement_status],
+            outputs=[
+                prompt_to_refine,
+                refinement_status,
+                refinement_raw_model_output,
+            ],
             show_progress="minimal",
         )
         refinement_generation_event.then(
@@ -4117,6 +5555,8 @@ def _on_ui_tabs():
             refinement_img_replace_generate,
             refinement_img_append_generate,
             refinement_prompt_action_status,
+            negative_result=refinement_negative_result,
+            include_negative=refinement_include_negative,
         )
 
         _connect_forgy_source_button(
@@ -4191,6 +5631,8 @@ def _on_ui_tabs():
                 forgy_min_p,
                 forgy_repetition_penalty,
                 forgy_seed,
+                show_model_thinking,
+                anima_text_provider,
                 forgy_generation_id,
             ],
             outputs=[
@@ -4199,6 +5641,7 @@ def _on_ui_tabs():
                 forgy_prompt_versions,
                 forgy_message,
                 forgy_status,
+                forgy_raw_model_output,
             ],
             show_progress="minimal",
         )
@@ -4253,6 +5696,8 @@ def _on_ui_tabs():
             forgy_img_replace_generate,
             forgy_img_append_generate,
             forgy_prompt_action_status,
+            negative_result=forgy_negative_result,
+            include_negative=forgy_include_negative,
         )
 
         for source_name, gallery, prompt_input in (

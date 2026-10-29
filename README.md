@@ -1,26 +1,30 @@
 # Forgy — Forge Neo Prompt Studio
 
-**Beta 0.5.2-beta.3 (main prerelease)**
+**Alpha 0.6.0-alpha.2 (development prerelease)**
 
-[![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
+[![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=develop)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
 A Forge Neo extension that turns a short image idea or an uploaded reference
 image into a polished image-generation prompt and can iteratively refine an
 existing prompt. Forgy, the included local creative copilot, can discuss an idea
 or uploaded image while maintaining a visible working prompt. The extension
-reuses the text and vision encoder already owned by Forge. It does not download
-or load a second language model.
+reuses the text and vision encoder already owned by Forge. It does not download,
+instantiate, or retain a second language model. MOSS generation loads only
+the selected encoder checkpoint's untied output head for the duration of one
+request. The optional experimental
+Anima/Qwen3.5 speech path reuses one model already cached by the separately
+installed Qwen3.5 Anima adapter.
 
-This beta adds an explicit modular adapter architecture and
-text-only Z-Image Base/Turbo and FLUX.2 Klein 4B adapters to the established
-Forgy Chat, Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement workflows. It
-has not yet been tested across a broad range of GPUs and Forge Neo
-configurations.
+The highlight of this alpha is the experimental MOSS-Image/Qwen3.5-9B adapter.
+It brings the active MOSS text and vision encoder to Forgy Chat,
+Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement, including editable,
+prompt-aware negative suggestions. The release also includes text-only Z-Image
+Base/Turbo, FLUX.2 Klein 4B, and stock Anima/Qwen3-0.6B adapters. It has not yet
+been tested across a broad range of GPUs and Forge Neo configurations.
 
-This hotfix restores cached prompt generation after Forge Neo 2.29.2 changed
-the shared Llama forward contract. Forgy now supports both Forge's earlier
-top-level KV-cache return and the current per-layer cache path. No Forge core
-changes or additional model loads are required.
+Forgy supports both Forge's earlier top-level KV-cache return and the current
+Forge Neo 2.29.2 per-layer cache path. No Forge core changes or additional
+durable model loads are required.
 
 ## Welcome
 
@@ -49,7 +53,7 @@ user data to Codex. This project is not affiliated with or endorsed by OpenAI.
   VAE files available in Forge's configured model directories;
 - a CUDA-capable GPU supported by the Forge installation.
 
-Development and current hotfix testing target Forge Neo 2.29.2.
+Development and current testing target Forge Neo 2.29.2.
 
 The KREA2 adapter supports its Qwen3-VL 4B text/vision encoder and a compatible
 VAE across all four workflows. The initial Z-Image Base/Turbo adapter reuses
@@ -59,7 +63,55 @@ disabled. The FLUX.2 Klein adapter provides the same three text workflows for
 Klein 4B and Base 4B through Forge's tied Qwen3-4B encoder. Klein reference
 images remain Forge generation inputs rather than Forgy vision inputs. Klein
 9B is rejected because Forge does not retain the separate untied Qwen3-8B LM
-head needed for text generation. Model detection, typed capabilities,
+head needed for text generation. The development branch also supports Anima
+through its original Forge-owned Qwen3-0.6B encoder for the three text
+workflows. That small encoder uses a request-local FP32 KV cache, a 256-token
+runtime ceiling, and a compact Forgy prompt/refinement mode. Obvious template
+copies and malformed base-model output are rejected; Forgy preserves the current
+prompt or falls back transparently to the cleaned new request. An explicit,
+off-by-default Qwen3.5 provider can instead reuse one unambiguous
+`sd-forge-qwen-35-encoder` cache together with the exact pinned official causal
+tail; it fails closed when the cache or verified local tail assets are missing.
+The experimental MOSS-Image adapter provides all four workflows from Forge's
+active Qwen3.5-9B text/vision backbone. MOSS accepts both cohesive captions and
+ordered tag sequences; the selected persona controls that prompt dialect, and
+refinement preserves it unless the user explicitly requests a change. Because
+the official MOSS configuration uses
+an untied output head, Forgy accepts exactly one dense BF16, FP16, or FP32 MOSS
+encoder among Forge's selected additional modules, loads only its `lm_head` for
+the request, and requires Forge to place the complete backbone on one device.
+Quantized LM heads, ambiguous module selections, and partial CPU/GPU placement
+fail closed. Image-to-Prompt uses Forge's active Qwen3.5 vision encoder and exact
+three-axis MRoPE metadata; no image model is sideloaded. RTX 5090 profiling then
+exposed an important Forge storage detail: the token embedding can be FP16 while
+the complete transformer is BF16. Following the embedding dtype caused
+`manual_cast` to convert backbone weights repeatedly. Forgy now validates and
+follows the dense transformer projection dtype, converts embeddings once, and
+loads the request-local output head in that dtype. In an identical
+369-input/16-output A/B smoke, generation fell from 43.52 to 8.73 seconds,
+prefill from 11.64 to 1.26 seconds, and decode from 27.74 to 1.48 seconds. A
+64-token prompt completed in 8.94 seconds with a 56 ms median decode; a
+synthetic 871-token vision request completed in 6.49 seconds with a 1.14-second
+prefill. Forge model reload time is separate from those generation timings.
+
+Each workflow also exposes a separate, editable `Suggested negative prompt
+(MOSS)` field. The official SFT model card uses CFG 3 with an empty negative
+prompt by default, while the official user guide documents `nsfw, worst quality,
+bad anatomy, watermark, jpeg artifact` as an effective example. Forgy therefore
+uses only `worst quality, watermark, jpeg artifact` as the non-contradictory
+core. It adds anatomy defects only for detected people or animals, hand/foot
+terms only when relevant human anatomy is actually requested, typography defects
+only for requested text, and style exclusions only for an unambiguous photo or
+illustration dialect. `nsfw` is added only when the request explicitly asks for
+safe-for-work or family-friendly content. This deterministic post-processing
+does not spend language-model tokens and never inserts negative terms into the
+positive prompt. The adjacent checkbox controls whether normal Forge transfer
+actions replace or merge the visible suggestion into Forge's negative-prompt
+field; disabling it preserves the existing Forge negative prompt. See the
+[official SFT model card](https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT)
+and [MOSS user guide](https://github.com/OpenMOSS/MOSS-Image/blob/main/USERGUIDE.md).
+
+Model detection, typed capabilities,
 request-local component resolution, and family prompt behavior live behind
 explicit adapter contracts. Unsupported stacks fail closed, and model-dependent
 workflow and image controls refresh after Forge loads the current selection. See
@@ -161,6 +213,32 @@ with its independent persona management below the Forge action rows.
 All four workflows place the active VRAM-profile summary at the very bottom,
 after their persona-management and Sampling sections, so this informational
 status does not interrupt the working flow.
+
+For local testing, the collapsed `Model output diagnostics (testing)` section
+offers an `Anima text provider` selector and an `Enable and show Qwen model
+thinking` checkbox. Both are request-local and are not saved to Forge's UI
+configuration. The Anima provider defaults to `Original Qwen3 0.6B`. Its
+Forgy Chat path deliberately uses compact prompt/refinement semantics rather
+than asking the base encoder to reproduce the full two-section agent protocol;
+the status identifies this mode. The selected Qwen3.5 provider and stronger
+model families retain their normal agent protocol. The
+experimental `Qwen3.5 4B adapter cache` choice requires exactly one model already
+cached by `sd-forge-qwen-35-encoder`; Forgy never calls that extension's model
+loader and reports a clear failure instead of falling back silently. The
+required UI order is: enable `Qwen3.5 Text Encoder (Anima)` in txt2img or img2img,
+select `qwen35_4b.safetensors`, complete one normal Forge generation, and only
+then select the Qwen3.5 provider in Forgy. Forge registers that extension's
+script module with a trailing `.py`; Forgy accepts both that live name and the
+normal direct-import name. The
+thinking option is off by default,
+is not saved to Forge's UI configuration, and applies only to subsequent
+requests while selected. Enabling it switches the supported Qwen adapter to its
+thinking prefix and shows the complete decoded generated text in a separate raw
+output field for the active workflow. The normal result stays separately
+filtered and usable for prompt transfer. Thinking consumes the same output-token
+budget, can increase latency substantially, and may reveal prompt or persona
+content; review the raw field before sharing it in a bug report.
+
 Idea-to-Prompt and Image-to-Prompt place `Send to prompt refinement` and `Send
 to Forgy` in a narrow column beside the generated prompt. Prompt Refinement
 uses that same side-column pattern for both source-result actions and `Send to
@@ -178,8 +256,10 @@ lists, scan model directories, download files, or instantiate weights itself.
 Forge remains responsible for architecture detection, component assembly,
 offloading, and memory management. The extension accepts the result only when
 the selected adapter can resolve the active model, encoder, tokenizer, and
-ModelPatcher. The current beta includes KREA2/Qwen3-VL and
-text-only Z-Image Base/Turbo and FLUX.2 Klein 4B adapters.
+ModelPatcher. The current development implementation includes KREA2/Qwen3-VL,
+text-only Z-Image Base/Turbo, FLUX.2 Klein 4B, stock Anima/Qwen3-0.6B, and an
+experimental MOSS-Image/Qwen3.5-9B text/vision adapter, plus Anima's explicitly
+selected experimental Qwen3.5 cached provider.
 
 Loading stays explicit so opening the assistant cannot unexpectedly allocate
 VRAM or unload another active model.
@@ -199,14 +279,12 @@ request shown in its placeholder. In `Refine prompt`, the current prompt and the
 
 The focused Idea-to-Prompt, Image-to-Prompt, and Refine stores keep their
 workflow-specific `Default` prompts. Forgy Chat's `Default` combines idea
-expansion, image analysis, and prompt refinement in one interactive persona. Its
-former built-in prompt remains available as `Default Legacy`. An unchanged old
-Forgy default migrates by exact known hash; edited defaults and custom personas
-are preserved. `Default` can be edited but not deleted. The built-in `Ghost`
-persona has an intentionally empty system prompt for direct, unguided encoder
-experiments and cannot be edited into a non-empty persona or deleted. Other
-personas still require a non-empty system prompt. Users can create, edit, and
-delete additional personas in the UI.
+expansion, image analysis, and prompt refinement in one interactive persona. A
+fresh installation receives only these four workflow-specific defaults; no
+additional testing or legacy persona is seeded. An unchanged old Default may be
+migrated by exact known hash, while edited defaults and every user-created local
+persona are preserved. `Default` can be edited but not deleted. Users can create,
+edit, and delete additional personas in the UI.
 
 Idea personas are stored locally in `personas.json`; image personas use
 `image_personas.json`; refinement personas use `refinement_personas.json`; Forgy
@@ -296,14 +374,10 @@ effective output limit can be lower after the persona, conversation, current
 prompt, and optional image tokens are counted. If an exact token sequence starts
 looping, generation stops early with the finish reason
 `repetition_stop` and the duplicate tail is discarded. Any `<think>` or
-`<analysis>` block produced despite the directive is removed before visible
-output. These guardrails keep a weak turn bounded; they cannot make the 4B
+`<analysis>` content is removed from the normal workflow result. It is shown
+only in the explicitly enabled, request-local testing diagnostic described
+above. These guardrails keep a weak turn bounded; they cannot make the 4B
 encoder reason like a larger conversational model.
-
-Selecting `Ghost` in Forgy removes those system-level response instructions.
-The raw reply remains visible, but Forgy's automatic working-prompt update will
-normally preserve the current prompt because the expected response markers may
-be absent.
 
 Prompt changes — including the small prompt-clear action and an explicit prompt
 grab — are kept in a bounded, session-only version list so `Undo prompt change`
@@ -351,6 +425,9 @@ the complete current prompt. If the requested output limit is
 too large, the extension reduces it and reports the effective value. After
 Forge places or offloads encoder weights and completes image encoding, the
 extension checks currently free VRAM again before allocating the cache.
+The original Anima 0.6B provider additionally caps generated output at 256
+tokens and uses an FP32 cache because Forge's manual-cast attention computes its
+queries, keys, and values in FP32.
 
 ## Seed and reproducibility
 
@@ -369,11 +446,13 @@ framework determinism.
 - no second language model or weight copy;
 - optional stack loading delegates to Forge's existing loader and queue;
 - uses only the active adapter's `clip.patcher`, encoder, tokenizer, and vision
-  module;
+  module, except for the explicitly selected Anima/Qwen3.5 path, which reuses
+  exactly one existing Qwen3.5 adapter cache;
 - runs inside the Forge queue;
 - asks Forge's memory manager to reserve the calculated KV-cache space;
 - keeps no global encoder, tokenizer, or CUDA tensor reference;
-- discards the temporary KV cache after each request;
+- discards temporary KV/recurrent caches and Qwen3.5 tail tensors after each
+  request;
 - stores personas only in the local extension directory;
 - keeps Forgy conversation and prompt versions in the current UI session only;
 - does not write uploaded images to extension storage; Forge/Gradio may still
@@ -383,10 +462,16 @@ framework determinism.
 
 ## Current limitations
 
-- this beta contains KREA2 and text-only Z-Image Base/Turbo and
-  FLUX.2 Klein 4B adapters; Z-Image Turbo still needs a separate live text
-  smoke, while Klein 4B has one bounded real-model text smoke but needs broader
-  prompt-quality and workflow testing;
+- this development branch contains KREA2 plus text-only Z-Image Base/Turbo,
+  FLUX.2 Klein 4B, and stock Anima/Qwen3-0.6B adapters; Z-Image Turbo still
+  needs a separate live text smoke, while Klein 4B and Anima each have bounded
+  real-model text smokes but need broader prompt-quality and workflow testing;
+- the original Anima 0.6B encoder is a small base text encoder, so Forgy Chat is
+  intentionally prompt-focused: new-prompt and current-prompt refinement are
+  supported, while richer conversational behavior belongs to the Qwen3.5 option;
+- Anima's experimental Qwen3.5 provider has bounded isolated and integrated
+  RTX 5090 text smokes, but still needs visible Gradio, longer-output,
+  lower-VRAM/offload, and broad prompt-quality testing;
 - one uploaded image per image-to-prompt request;
 - image upload generates text only and does not configure img2img or
   reference-image conditioning;
@@ -396,6 +481,12 @@ framework determinism.
   native Forge generation inputs, normal Klein image generation still needs a
   recorded smoke, and Klein 9B is not supported without its discarded untied
   LM head;
+- MOSS text, 64-token, synthetic-image, visible Idea-to-Prompt, and visible
+  Image-to-Prompt smokes pass on an RTX 5090. The maintainer also confirmed all
+  locally configured Idea personas and strong prose-prompt quality. Broader
+  sampling, cancellation, diverse real-image inputs, and lower-VRAM/offload
+  behavior still need live testing; the selected local encoder contains no MTP
+  tensors, so speculative decoding is not available for that stack;
 - no persistent local generation history; Forgy keeps only bounded session undo versions;
 - Forgy never starts a Forge image generation autonomously; the user must click
   an explicit `replace + generate` or `append + generate` action;
