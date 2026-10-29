@@ -48,6 +48,13 @@
     padding-right: 3rem !important;
 }
 
+/* Passive model detection changes these messages once when Forge becomes ready.
+   Reserve their normal two-line height so the surrounding controls stay still. */
+.forge-krea-loader-status,
+.forge-krea-capability-notice {
+    min-height: 3.5rem;
+}
+
 #forge_krea_forgy_image img {
     cursor: zoom-in;
 }

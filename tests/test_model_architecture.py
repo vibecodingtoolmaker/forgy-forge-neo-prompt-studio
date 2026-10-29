@@ -6,9 +6,13 @@ from types import SimpleNamespace
 import unittest
 
 from forgy.adapters import (
+    ANIMA_TEXT_PROVIDER_ORIGINAL,
+    ANIMA_TEXT_PROVIDER_QWEN35,
     AdapterError,
+    AnimaAdapter,
     Flux2KleinAdapter,
     Krea2Adapter,
+    MossAdapter,
     ZImageAdapter,
 )
 from forgy.capabilities import (
@@ -154,6 +158,87 @@ def _complete_flux2_klein_stack(
     return model, encoder, tokenizer, patcher, engine
 
 
+def _complete_anima_stack(*, include_final_norm=True, current_forge=False):
+    encoder_type = _runtime_class("Qwen3_06B", "backend.nn.llm.llama")
+    tokenizer_type = _runtime_class("Qwen2TokenizerFast", "test_runtime")
+    engine_type = _runtime_class(
+        "Qwen06Engine" if current_forge else "AnimaTextProcessingEngine",
+        "backend.text_processing.anima_engine",
+    )
+    model_type = _runtime_class("Anima", "backend.diffusion_engine.anima")
+
+    encoder = encoder_type()
+    core_model = SimpleNamespace(
+        config=SimpleNamespace(hidden_size=1024, vocab_size=151936),
+        embed_tokens=object(),
+    )
+    if include_final_norm:
+        core_model.norm = object()
+    encoder.model = core_model
+    tokenizer = tokenizer_type()
+    patcher = object()
+    clip = SimpleNamespace(
+        cond_stage_model=SimpleNamespace(qwen3_06b=encoder),
+        tokenizer=SimpleNamespace(qwen3_06b=tokenizer),
+        patcher=patcher,
+    )
+    engine = engine_type()
+    engine.text_encoder = (
+        SimpleNamespace(transformer=encoder) if current_forge else encoder
+    )
+    engine.qwen_tokenizer = (
+        SimpleNamespace(tokenizer=tokenizer) if current_forge else tokenizer
+    )
+    model = model_type()
+    model.forge_objects = SimpleNamespace(clip=clip)
+    if current_forge:
+        model.text_processing_engine_qwen = engine
+    else:
+        model.text_processing_engine_anima = engine
+    model.sd_checkpoint_info = SimpleNamespace(name="Anima-2B.safetensors")
+    return model, encoder, tokenizer, patcher, engine
+
+
+def _complete_moss_stack():
+    encoder_type = _runtime_class("Qwen35_9B", "backend.nn.llm.llama")
+    tokenizer_type = _runtime_class("Qwen2TokenizerFast", "test_runtime")
+    engine_type = _runtime_class(
+        "Qwen359BEngine", "backend.text_processing.moss_image_engine"
+    )
+    model_type = _runtime_class("MOSSImage", "backend.diffusion_engine.moss_image")
+
+    encoder = encoder_type()
+    encoder.model = SimpleNamespace(
+        config=SimpleNamespace(
+            hidden_size=4096,
+            intermediate_size=12288,
+            vocab_size=248320,
+            num_hidden_layers=32,
+        ),
+        embed_tokens=object(),
+        norm=object(),
+    )
+    tokenizer = tokenizer_type()
+    patcher = object()
+    clip = SimpleNamespace(
+        cond_stage_model=SimpleNamespace(qwen35_9b=encoder),
+        tokenizer=SimpleNamespace(qwen35_9b=tokenizer),
+        patcher=patcher,
+    )
+    engine = engine_type()
+    engine.text_encoder = SimpleNamespace(transformer=encoder)
+    engine.tokenizer = SimpleNamespace(tokenizer=tokenizer)
+    engine.llama_template = (
+        "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n<think>\n"
+    )
+    engine.vision_block = "<|vision_start|><|image_pad|><|vision_end|>"
+    model = model_type()
+    model.forge_objects = SimpleNamespace(clip=clip)
+    model.text_processing_engine_qwen = engine
+    model.sd_checkpoint_info = SimpleNamespace(name="MOSS-Image-SFT.safetensors")
+    return model, encoder, tokenizer, patcher, engine
+
+
 class ModelArchitectureTests(unittest.TestCase):
     def test_every_new_module_compiles_without_forge_dependencies(self) -> None:
         for path in (ROOT / "forgy").rglob("*.py"):
@@ -200,11 +285,13 @@ class ModelArchitectureTests(unittest.TestCase):
         self.assertNotIn("components", adapter.__dict__)
         self.assertNotIn("sd_model", adapter.__dict__)
 
-    def test_current_forge_wrappers_resolve_all_released_model_families(self) -> None:
+    def test_current_forge_wrappers_resolve_all_supported_model_families(self) -> None:
         stacks = (
             (_complete_krea2_stack(current_forge=True), Krea2Adapter()),
             (_complete_zimage_stack(current_forge=True), ZImageAdapter()),
             (_complete_flux2_klein_stack(current_forge=True), Flux2KleinAdapter()),
+            (_complete_anima_stack(current_forge=True), AnimaAdapter()),
+            (_complete_moss_stack(), MossAdapter()),
         )
 
         for stack, adapter in stacks:
@@ -279,6 +366,41 @@ class ModelArchitectureTests(unittest.TestCase):
         self.assertIn("Treat the user's image idea", rendered)
         self.assertIn("return exactly one finished image-generation prompt", rendered)
         self.assertTrue(rendered.endswith("<think>\n\n</think>\n\n"))
+
+        thinking_rendered = adapter.render_generation_prompt(
+            engine,
+            "a red fox",
+            "use dramatic backlight",
+            "Return one polished natural-language prompt.",
+            workflow=Workflow.IDEA_TO_PROMPT,
+            validate_system_prompt=lambda value, **_kwargs: value,
+            show_model_thinking=True,
+        )
+        self.assertTrue(thinking_rendered.endswith("<think>\n"))
+        self.assertFalse(thinking_rendered.endswith("<think>\n\n</think>\n\n"))
+
+    def test_krea2_adapter_switches_between_thinking_prefixes(self) -> None:
+        adapter = Krea2Adapter()
+        engine = SimpleNamespace(
+            llama_template=(
+                "<|im_start|>system\nDefault<|im_end|>\n"
+                "<|im_start|>user\n{}<|im_end|>\n"
+                "<|im_start|>assistant\n"
+            )
+        )
+
+        def render(enabled):
+            return adapter.render_generation_prompt(
+                engine,
+                "a moonlit portrait",
+                "",
+                "Custom persona",
+                validate_system_prompt=lambda value, **_kwargs: value,
+                show_model_thinking=enabled,
+            )
+
+        self.assertTrue(render(False).endswith("<think>\n\n</think>\n\n"))
+        self.assertTrue(render(True).endswith("<think>\n"))
 
     def test_zimage_workflow_contracts_are_task_specific(self) -> None:
         adapter = ZImageAdapter()
@@ -379,6 +501,175 @@ class ModelArchitectureTests(unittest.TestCase):
         self.assertIn("finished natural-language image prompt", rendered)
         self.assertEqual(rendered.count("<think>"), 1)
         self.assertTrue(rendered.endswith("<think>\n\n</think>\n\n"))
+
+        thinking_rendered = adapter.render_generation_prompt(
+            engine,
+            "a glass greenhouse in winter",
+            "use soft morning light",
+            "Return one polished natural-language prompt.",
+            workflow=Workflow.IDEA_TO_PROMPT,
+            validate_system_prompt=lambda value, **_kwargs: value,
+            show_model_thinking=True,
+        )
+        self.assertEqual(thinking_rendered.count("<think>"), 1)
+        self.assertTrue(thinking_rendered.endswith("<think>\n"))
+
+    def test_anima_adapter_resolves_stock_qwen06_as_text_only(self) -> None:
+        adapter = AnimaAdapter()
+        manager = ModelManager(
+            (Krea2Adapter(), ZImageAdapter(), Flux2KleinAdapter(), adapter)
+        )
+        model, encoder, tokenizer, patcher, _engine = _complete_anima_stack()
+
+        context = manager.resolve(model)
+
+        self.assertEqual(context.identity.adapter_id, "anima-qwen3-0.6b")
+        self.assertEqual(context.identity.family, "anima")
+        self.assertEqual(context.identity.variant, "qwen3-0.6b")
+        self.assertIn("original TE", context.identity.display_name)
+        self.assertIs(context.components.encoder, encoder)
+        self.assertIs(context.components.tokenizer, tokenizer)
+        self.assertIs(context.components.patcher, patcher)
+        self.assertTrue(context.capabilities.text_generation)
+        self.assertFalse(context.capabilities.vision_input)
+        self.assertFalse(context.capabilities.supports(Workflow.IMAGE_TO_PROMPT))
+        self.assertTrue(context.capabilities.supports(Workflow.FORGY_CHAT))
+        self.assertNotIn("components", adapter.__dict__)
+        self.assertNotIn("sd_model", adapter.__dict__)
+
+    def test_anima_adapter_requires_the_trained_tied_speech_contract(self) -> None:
+        model, *_ = _complete_anima_stack(include_final_norm=False)
+
+        with self.assertRaisesRegex(AdapterError, "final language-model norm"):
+            ModelManager((AnimaAdapter(),)).resolve(model)
+
+    def test_anima_adapter_builds_explicit_qwen_roles_and_workflow(self) -> None:
+        adapter = AnimaAdapter()
+        _model, _encoder, _tokenizer, _patcher, engine = _complete_anima_stack()
+
+        rendered = adapter.render_generation_prompt(
+            engine,
+            "a small robot in a greenhouse",
+            "use a low camera angle",
+            "Return one polished image prompt.",
+            workflow=Workflow.IDEA_TO_PROMPT,
+            validate_system_prompt=lambda value, **_kwargs: value,
+        )
+
+        self.assertTrue(rendered.startswith("<|im_start|>system\n"))
+        self.assertIn("<|im_start|>user\na small robot", rendered)
+        self.assertIn("Additional instruction:\nuse a low camera angle", rendered)
+        self.assertIn("Treat the user's image idea", rendered)
+        self.assertTrue(rendered.endswith("<think>\n\n</think>\n\n"))
+
+        thinking = adapter.render_generation_prompt(
+            engine,
+            "a small robot in a greenhouse",
+            "",
+            "Return one polished image prompt.",
+            workflow=Workflow.IDEA_TO_PROMPT,
+            validate_system_prompt=lambda value, **_kwargs: value,
+            show_model_thinking=True,
+        )
+        self.assertTrue(thinking.endswith("<think>\n"))
+
+    def test_anima_adapter_removes_generated_plain_text_role_leakage(self) -> None:
+        tokenizer = SimpleNamespace(
+            all_special_tokens=[],
+            decode=lambda *_args, **_kwargs: (
+                "Assistant: A red fox resting beside a quiet alpine lake."
+                "Human: Please provide another version."
+            ),
+        )
+
+        decoded = AnimaAdapter.decode_generated_text(tokenizer, [1, 2, 3])
+
+        self.assertEqual(
+            decoded,
+            "A red fox resting beside a quiet alpine lake.",
+        )
+
+    def test_anima_adapter_selects_text_provider_explicitly_and_fails_closed(
+        self,
+    ) -> None:
+        adapter = AnimaAdapter()
+        adapter.bind_runtime(
+            text_generator=lambda **kwargs: kwargs["anima_text_provider"]
+        )
+
+        self.assertEqual(adapter.generate_text(), ANIMA_TEXT_PROVIDER_ORIGINAL)
+        self.assertEqual(
+            adapter.generate_text(anima_text_provider=ANIMA_TEXT_PROVIDER_QWEN35),
+            ANIMA_TEXT_PROVIDER_QWEN35,
+        )
+        with self.assertRaisesRegex(AdapterError, "Unknown Anima text provider"):
+            adapter.generate_text(anima_text_provider="automatic fallback")
+
+    def test_moss_adapter_resolves_active_qwen35_9b_with_vision(self) -> None:
+        adapter = MossAdapter()
+        manager = ModelManager(
+            (
+                Krea2Adapter(),
+                ZImageAdapter(),
+                Flux2KleinAdapter(),
+                AnimaAdapter(),
+                adapter,
+            )
+        )
+        model, encoder, tokenizer, patcher, engine = _complete_moss_stack()
+
+        context = manager.resolve(model)
+
+        self.assertEqual(context.identity.adapter_id, "moss-image-qwen35-9b")
+        self.assertEqual(context.identity.family, "moss-image")
+        self.assertEqual(context.identity.variant, "qwen3.5-9b")
+        self.assertIs(context.components.encoder, encoder)
+        self.assertIs(context.components.tokenizer, tokenizer)
+        self.assertIs(context.components.patcher, patcher)
+        self.assertTrue(context.capabilities.text_generation)
+        self.assertTrue(context.capabilities.vision_input)
+        self.assertTrue(context.capabilities.supports(Workflow.IMAGE_TO_PROMPT))
+        self.assertTrue(context.capabilities.supports(Workflow.FORGY_CHAT))
+        self.assertNotIn("components", adapter.__dict__)
+        self.assertNotIn("sd_model", adapter.__dict__)
+
+        rendered = adapter.render_generation_prompt(
+            engine,
+            "a poster with the word MOSS",
+            "use a low camera angle",
+            "Return one polished image prompt.",
+            workflow=Workflow.IDEA_TO_PROMPT,
+            validate_system_prompt=lambda value, **_kwargs: value,
+        )
+        self.assertTrue(rendered.startswith("<|im_start|>system\n"))
+        self.assertIn("visible text", rendered)
+        self.assertIn("comma-separated tag sequence", rendered)
+        self.assertNotIn("finished natural-language image prompt", rendered)
+        self.assertEqual(rendered.count("<think>"), 1)
+        self.assertTrue(rendered.endswith("<think>\n\n</think>\n\n"))
+
+        thinking = adapter.render_generation_prompt(
+            engine,
+            "a poster with the word MOSS",
+            "",
+            "Return one polished image prompt.",
+            validate_system_prompt=lambda value, **_kwargs: value,
+            show_model_thinking=True,
+        )
+        self.assertEqual(thinking.count("<think>"), 1)
+        self.assertTrue(thinking.endswith("<think>\n"))
+
+        image_rendered = adapter.render_image_generation_prompt(
+            engine,
+            "preserve the visible lettering",
+            "Describe the uploaded image faithfully.",
+            default_image_request="Reconstruct the uploaded image.",
+            validate_system_prompt=lambda value, **_kwargs: value,
+        )
+        self.assertIn("Picture 1: <|vision_start|>", image_rendered)
+        self.assertIn("preserve the visible lettering", image_rendered)
+        self.assertIn("authoritative visual source", image_rendered)
+        self.assertIn("caption or tag-sequence dialect", image_rendered)
 
     def test_runtime_binding_keeps_dispatch_inside_the_selected_adapter(self) -> None:
         calls = []

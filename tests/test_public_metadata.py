@@ -45,6 +45,8 @@ def public_constants(source: str) -> dict[str, object]:
         "DEFAULT_AGENT_LEGACY_PERSONA_NAME",
         "DEFAULT_AGENT_LEGACY_PERSONA_PROMPT",
         "FORGY_MAX_OUTPUT_TOKENS",
+        "ANIMA_STOCK_MAX_OUTPUT_TOKENS",
+        "MOSS_MAX_OUTPUT_TOKENS",
         "VRAM_PROFILES",
     }
     values: dict[str, object] = {}
@@ -148,12 +150,7 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIs(result[0], embeds)
         self.assertEqual(
             result[1:],
-            (
-                "attention-mask",
-                "positions:3",
-                "visual:embeds-info",
-                ["deepstack"],
-            ),
+            ("attention-mask", "positions:3", "visual:embeds-info", ["deepstack"]),
         )
         self.assertEqual(calls[0][1], "text-device")
         self.assertEqual(calls[0][0][0][1]["type"], "image")
@@ -172,6 +169,8 @@ class PublicMetadataTests(unittest.TestCase):
                 "DEFAULT_AGENT_LEGACY_PERSONA_NAME",
                 "DEFAULT_AGENT_LEGACY_PERSONA_PROMPT",
                 "FORGY_MAX_OUTPUT_TOKENS",
+                "ANIMA_STOCK_MAX_OUTPUT_TOKENS",
+                "MOSS_MAX_OUTPUT_TOKENS",
                 "VRAM_PROFILES",
             },
         )
@@ -238,6 +237,8 @@ class PublicMetadataTests(unittest.TestCase):
 
     def test_forgy_allows_long_iterative_prompt_turns(self) -> None:
         self.assertEqual(self.constants["FORGY_MAX_OUTPUT_TOKENS"], 4096)
+        self.assertEqual(self.constants["ANIMA_STOCK_MAX_OUTPUT_TOKENS"], 256)
+        self.assertEqual(self.constants["MOSS_MAX_OUTPUT_TOKENS"], 1024)
         self.assertIn(
             "forgy_sampling_controls[1].value = min(\n"
             "                    initial_context_limit, FORGY_MAX_OUTPUT_TOKENS",
@@ -269,10 +270,7 @@ class PublicMetadataTests(unittest.TestCase):
         )
         legacy_name = self.constants["DEFAULT_AGENT_LEGACY_PERSONA_NAME"]
         self.assertEqual(legacy_name, "Default Legacy")
-        self.assertEqual(
-            self.agent_personas["personas"][legacy_name],
-            self.constants["DEFAULT_AGENT_LEGACY_PERSONA_PROMPT"],
-        )
+        self.assertNotIn(legacy_name, self.agent_personas["personas"])
         legacy_hash = hashlib.sha256(
             self.constants["DEFAULT_AGENT_LEGACY_PERSONA_PROMPT"].encode("utf-8")
         ).hexdigest()
@@ -340,7 +338,7 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertEqual(migrated["personas"]["User style"], "Keep this custom prompt.")
         self.assertEqual(persisted, migrated)
 
-    def test_all_workflows_include_the_empty_ghost_persona(self) -> None:
+    def test_public_examples_contain_only_the_default_persona(self) -> None:
         self.assertEqual(self.constants["GHOST_PERSONA_NAME"], "Ghost")
         for personas in (
             self.personas,
@@ -348,8 +346,7 @@ class PublicMetadataTests(unittest.TestCase):
             self.refinement_personas,
             self.agent_personas,
         ):
-            self.assertIn("Ghost", personas["personas"])
-            self.assertEqual(personas["personas"]["Ghost"], "")
+            self.assertEqual(set(personas["personas"]), {"Default"})
 
     def test_only_explicit_runtime_paths_may_accept_an_empty_system_prompt(
         self,
@@ -417,6 +414,79 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertGreaterEqual(
             self.source.count("gr.update(value=None, interactive=False)"), 2
         )
+
+    def test_passive_model_detection_refreshes_without_loading(self) -> None:
+        self.assertIn("def _passive_model_detection_probe():", self.source)
+        self.assertIn("def _passive_model_detection_updates(status):", self.source)
+        self.assertIn(
+            "passive_model_detection = gr.Timer(1.0, active=not stack_ready)",
+            self.source,
+        )
+        self.assertIn("passive_model_detection.tick(", self.source)
+        self.assertIn("passive_model_detection_status.change(", self.source)
+        self.assertIn(
+            'passive_model_detection_status = gr.Textbox(value="", visible=False)',
+            self.source,
+        )
+        self.assertNotIn("passive_model_detection_status = gr.State()", self.source)
+
+        waiting_probe = isolated_function(
+            self.source,
+            "_passive_model_detection_probe",
+            {
+                "_forge_stack_status": lambda: (False, "waiting"),
+                "gr": SimpleNamespace(update=lambda **kwargs: kwargs),
+            },
+        )()
+        ready_probe = isolated_function(
+            self.source,
+            "_passive_model_detection_probe",
+            {
+                "_forge_stack_status": lambda: (True, "ready"),
+                "gr": SimpleNamespace(update=lambda **kwargs: kwargs),
+            },
+        )()
+        ready_updates = isolated_function(
+            self.source,
+            "_passive_model_detection_updates",
+            {
+                "_model_capability_updates": lambda: ("capabilities",),
+                "gr": SimpleNamespace(update=lambda **kwargs: kwargs),
+            },
+        )("ready")
+
+        self.assertEqual(waiting_probe, ({}, {}))
+        self.assertEqual(ready_probe, ("ready", {"active": False}))
+        self.assertEqual(
+            ready_updates,
+            (
+                "ready",
+                {"variant": "secondary"},
+                "capabilities",
+            ),
+        )
+
+    def test_manual_model_loading_pauses_and_rearms_passive_detection(self) -> None:
+        gr = SimpleNamespace(update=lambda **kwargs: kwargs)
+        start = isolated_function(
+            self.source,
+            "_start_model_loading",
+            {"gr": gr},
+        )
+        finish_waiting = isolated_function(
+            self.source,
+            "_finish_model_loading",
+            {"_forge_stack_status": lambda: (False, "waiting"), "gr": gr},
+        )
+        finish_ready = isolated_function(
+            self.source,
+            "_finish_model_loading",
+            {"_forge_stack_status": lambda: (True, "ready"), "gr": gr},
+        )
+
+        self.assertEqual(start()[2], {"active": False})
+        self.assertEqual(finish_waiting()[1], {"active": True})
+        self.assertEqual(finish_ready()[1], {"active": False})
 
     def test_current_forge_selection_loader_only_refreshes_and_reloads(self) -> None:
         calls = []
@@ -551,6 +621,90 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertEqual(updated, "new prompt")
         self.assertTrue(status.startswith("✅"))
         self.assertIn("Starting image generation", status)
+
+    def test_moss_negative_transfer_is_explicit_and_preserves_user_control(
+        self,
+    ) -> None:
+        transfer = isolated_function(self.source, "_transfer_prompt", {})
+        merge = isolated_function(self.source, "_merge_negative_prompts", {})
+        transfer_pair = isolated_function(
+            self.source,
+            "_transfer_prompt_with_negative",
+            {
+                "_transfer_prompt": transfer,
+                "_merge_negative_prompts": merge,
+            },
+        )
+
+        positive, negative, status = transfer_pair(
+            "new prompt",
+            "old prompt",
+            "worst quality, watermark",
+            "blurry, watermark",
+            True,
+            mode="append",
+            target_name="txt2img",
+        )
+        self.assertEqual(positive, "old prompt\nnew prompt")
+        self.assertEqual(negative, "blurry, watermark, worst quality")
+        self.assertIn("merged", status)
+
+        positive, negative, status = transfer_pair(
+            "new prompt",
+            "old prompt",
+            "worst quality",
+            "my custom negative",
+            False,
+            mode="replace",
+            target_name="img2img",
+        )
+        self.assertEqual(positive, "new prompt")
+        self.assertEqual(negative, "my custom negative")
+        self.assertNotIn("negative prompt", status)
+
+        for element_id in ("txt2img_neg_prompt", "img2img_neg_prompt"):
+            self.assertIn(element_id, self.source)
+        self.assertIn('label="Suggested negative prompt (MOSS)"', self.source)
+        self.assertIn(
+            'label="Include this negative prompt in Forge transfer actions"',
+            self.source,
+        )
+        tree = ast.parse(self.source, filename=str(SCRIPT))
+        output_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_create_negative_prompt_output"
+        ]
+        self.assertEqual(len(output_calls), 4)
+
+    def test_negative_suggestions_are_moss_only_and_separate_from_generation(
+        self,
+    ) -> None:
+        error_type = type("PromptAssistantError", (Exception,), {})
+        active_adapter_id = "moss-image-qwen35-9b"
+        suggest = isolated_function(
+            self.source,
+            "_suggest_negative_prompt_for_active_adapter",
+            {
+                "_active_model_context": lambda: SimpleNamespace(
+                    identity=SimpleNamespace(adapter_id=active_adapter_id)
+                ),
+                "MOSS_ADAPTER": SimpleNamespace(adapter_id="moss-image-qwen35-9b"),
+                "PromptAssistantError": error_type,
+                "AdapterError": error_type,
+                "suggest_moss_negative_prompt": lambda *parts: " | ".join(parts),
+            },
+        )
+
+        self.assertEqual(
+            suggest("positive prompt", "original idea"),
+            "positive prompt | original idea",
+        )
+        active_adapter_id = "krea2-qwen3-vl"
+        self.assertEqual(suggest("positive prompt", "original idea"), "")
+        self.assertEqual(suggest(""), "")
 
     def test_generate_after_transfer_uses_forge_native_generate_buttons(self) -> None:
         build_js = isolated_function(self.source, "_forge_generate_click_js", {})
@@ -887,12 +1041,13 @@ class PublicMetadataTests(unittest.TestCase):
                 "_run_generation": lambda *args, **kwargs: (
                     "",
                     "**Error:** simulated",
+                    "raw diagnostic",
                 ),
                 "Workflow": SimpleNamespace(REFINE_PROMPT="refine_prompt"),
             },
         )
 
-        prompt, status = run_refinement(
+        prompt, status, raw_output = run_refinement(
             "Original prompt",
             "Change the lighting",
             "Default",
@@ -906,17 +1061,21 @@ class PublicMetadataTests(unittest.TestCase):
             0.05,
             1.05,
             0,
+            False,
+            "Original Qwen3 0.6B",
             "generation-id",
         )
 
         self.assertEqual(prompt, "Original prompt")
         self.assertIn("simulated", status)
+        self.assertEqual(raw_output, "raw diagnostic")
 
     def test_forgy_request_contains_working_state_and_recent_chat(self) -> None:
         namespace = {
             "FORGY_MAX_CONTEXT_TURNS": 2,
             "FORGY_MAX_STORED_TURNS": 50,
             "QWEN_NO_THINK_DIRECTIVE": "/no_think",
+            "QWEN_THINK_DIRECTIVE": "/think",
             "PromptAssistantError": type("PromptAssistantError", (Exception,), {}),
         }
         normalize = isolated_function(
@@ -944,6 +1103,126 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertTrue(request.rstrip().endswith("/no_think"))
         self.assertEqual(omitted_turns, 1)
 
+        thinking_request, _omitted_turns = build(
+            "Move the camera farther away.",
+            "Current portrait prompt.",
+            history,
+            show_model_thinking=True,
+        )
+        self.assertTrue(thinking_request.rstrip().endswith("/think"))
+
+    def test_model_thinking_diagnostics_keep_the_working_result_clean(self) -> None:
+        prepare_output = isolated_function(self.source, "_prepare_model_output", {})
+        decoded = (
+            "private reasoning</think>\n"
+            "FORGY_REPLY:\nVisible answer.\n\nUPDATED_PROMPT:\n[UNCHANGED]"
+        )
+
+        cleaned, raw_output, removed = prepare_output(Krea2Adapter(), decoded, True)
+        self.assertTrue(removed)
+        self.assertNotIn("private reasoning", cleaned)
+        self.assertIn("Visible answer.", cleaned)
+        self.assertEqual(raw_output, decoded)
+
+        cleaned, raw_output, removed = prepare_output(Krea2Adapter(), decoded, False)
+        self.assertTrue(removed)
+        self.assertIn("Visible answer.", cleaned)
+        self.assertEqual(raw_output, "")
+
+    def test_model_thinking_checkbox_is_explicit_and_request_local(self) -> None:
+        self.assertIn(
+            'with gr.Accordion("Model output diagnostics (testing)"', self.source
+        )
+        self.assertIn('label="Enable and show Qwen model thinking"', self.source)
+        self.assertIn("show_model_thinking.do_not_save_to_config = True", self.source)
+
+    def test_anima_qwen35_provider_is_explicit_request_local_and_loader_free(
+        self,
+    ) -> None:
+        self.assertIn('label="Anima text provider"', self.source)
+        self.assertIn(
+            "anima_text_provider.do_not_save_to_config = True",
+            self.source,
+        )
+        self.assertIn("Multiple distinct Qwen3.5 adapter caches", self.source)
+        self.assertIn('candidate_type.__module__.removesuffix(".py")', self.source)
+        self.assertNotIn("._load_model(", self.source)
+        self.assertIn("uses the same output-token budget", self.source)
+        self.assertIn("show_model_thinking.change(", self.source)
+        for output_name in (
+            "forgy_raw_model_output",
+            "text_raw_model_output",
+            "image_raw_model_output",
+            "refinement_raw_model_output",
+        ):
+            self.assertIn(f"{output_name} = _create_raw_model_output()", self.source)
+
+    def test_moss_provider_uses_only_the_selected_request_local_untied_head(
+        self,
+    ) -> None:
+        self.assertIn("MOSS_ADAPTER = MossAdapter()", self.source)
+        self.assertIn("def _selected_moss_lm_head_path()", self.source)
+        self.assertIn(
+            'getattr(shared.opts, "forge_additional_modules", ())', self.source
+        )
+        self.assertIn("inspect_moss_lm_head(path)", self.source)
+        self.assertIn("load_moss_lm_head(", self.source)
+        self.assertIn("moss_backbone_compute_dtype(encoder)", self.source)
+        self.assertIn("dtype=runtime_dtype", self.source)
+        self.assertIn("embeddings.to(dtype=self.compute_dtype)", self.model_source)
+        self.assertIn("ForgeQwen359BCausalLMRuntime", self.source)
+        self.assertIn("def _moss_multimodal_embeds(", self.source)
+        self.assertIn("runtime.prefill_embeddings(", self.source)
+        self.assertIn("force_full_load=True", self.source)
+        self.assertIn("del lm_head", self.source)
+        self.assertNotIn("from_pretrained(", self.model_source)
+        self.assertIn("experimental MOSS-Image/Qwen3.5-9B", self.readme)
+        self.assertIn("369-input/16-output A/B smoke", self.readme)
+        self.assertIn("43.52 to 8.73 seconds", self.readme)
+        self.assertIn("three-axis MRoPE", self.readme)
+
+    def test_qwen35_provider_accepts_forges_dot_py_script_module_name(self) -> None:
+        provider_type = type(
+            "Qwen35EncoderForForge",
+            (),
+            {"__module__": "forge_qwen35_encoder.py"},
+        )
+        provider = provider_type()
+        provider._cached_model = object()
+        provider._cached_tokenizer = object()
+        provider._cached_model_name = "qwen35_4b.safetensors"
+        patcher = object()
+        provider._qwen35_clip = SimpleNamespace(patcher=patcher)
+        namespace = {
+            "forge_scripts": SimpleNamespace(
+                scripts_txt2img=SimpleNamespace(alwayson_scripts=[provider]),
+                scripts_img2img=SimpleNamespace(alwayson_scripts=[]),
+            ),
+            "Path": Path,
+            "PromptAssistantError": type("PromptAssistantError", (RuntimeError,), {}),
+        }
+        resolve = isolated_function(self.source, "_cached_qwen35_provider", namespace)
+
+        model, tokenizer, resolved_patcher = resolve()
+
+        self.assertIs(model, provider._cached_model)
+        self.assertIs(tokenizer, provider._cached_tokenizer)
+        self.assertIs(resolved_patcher, patcher)
+
+        updates = isolated_function(
+            self.source,
+            "_model_thinking_output_updates",
+            {"gr": SimpleNamespace(update=lambda **kwargs: kwargs)},
+        )
+        self.assertEqual(
+            updates(True),
+            tuple({"value": "", "visible": True} for _workflow in range(4)),
+        )
+        self.assertEqual(
+            updates(False),
+            tuple({"value": "", "visible": False} for _workflow in range(4)),
+        )
+
     def test_internal_thinking_is_removed_before_visible_output(self) -> None:
         strip_thinking = isolated_function(
             self.source,
@@ -959,6 +1238,12 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertTrue(removed)
         self.assertNotIn("private chain of thought", cleaned)
         self.assertIn("FORGY_REPLY:\nVisible answer.", cleaned)
+
+        cleaned, removed = strip_thinking(
+            "prefilled-prefix reasoning</think>\nVisible answer."
+        )
+        self.assertTrue(removed)
+        self.assertEqual(cleaned, "Visible answer.")
 
         cleaned, removed = strip_thinking("<analysis>unfinished private reasoning")
         self.assertTrue(removed)
@@ -1033,6 +1318,51 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertEqual(raw, "Unstructured reply")
         self.assertEqual(preserved, "A portrait.")
         self.assertFalse(parsed)
+
+        reply, preserved, parsed = parse(
+            "FORGY_REPLY:\nI understand the request.\n\n"
+            "UPDATED_PROMPT:\nThe complete updated image prompt, or "
+            "[UNCHANGED].__ (copied request text)",
+            "A portrait.",
+        )
+        self.assertEqual(reply, "I understand the request.")
+        self.assertEqual(preserved, "A portrait.")
+        self.assertFalse(parsed)
+
+    def test_stock_anima_generation_uses_bounded_kv_cache(self) -> None:
+        self.assertIn(
+            "past_key_values = _allocate_kv_cache(",
+            self.source,
+        )
+        self.assertIn(
+            "past_key_values=past_key_values,",
+            self.source,
+        )
+        self.assertNotIn(
+            "The stock Anima language-model core returned an incompatible "
+            '"full-context result."',
+            self.source,
+        )
+
+        normalize_idea = isolated_function(
+            self.source,
+            "_normalize_stock_anima_idea",
+            {"re": __import__("re")},
+        )
+        self.assertEqual(
+            normalize_idea("I want to see a red fox beside a lake."),
+            "A red fox beside a lake.",
+        )
+
+        prompt_is_usable = isolated_function(
+            self.source,
+            "_stock_anima_prompt_is_usable",
+            {"re": __import__("re")},
+        )
+        self.assertTrue(
+            prompt_is_usable("A red fox rests beside a quiet alpine lake at sunrise.")
+        )
+        self.assertFalse(prompt_is_usable("\ufffd\ub825\nStepThrough\nStepThrough"))
 
     def test_forgy_prompt_versions_ignore_empty_values_and_stay_bounded(self) -> None:
         normalize = isolated_function(
@@ -1321,6 +1651,16 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIn(".forge-krea-persona-dropdown ul.options", self.style)
         self.assertIn("overflow-y: scroll", self.style)
         self.assertIn("scrollbar-gutter: stable", self.style)
+
+    def test_passive_detection_status_areas_reserve_layout_height(self) -> None:
+        self.assertIn('elem_classes=["forge-krea-loader-status"]', self.source)
+        self.assertEqual(
+            self.source.count('elem_classes=["forge-krea-capability-notice"]'),
+            2,
+        )
+        self.assertIn(".forge-krea-loader-status", self.style)
+        self.assertIn(".forge-krea-capability-notice", self.style)
+        self.assertIn("min-height: 3.5rem", self.style)
 
     def test_forgy_prompt_clear_button_and_image_lightbox_are_styled(self) -> None:
         self.assertIn("#forge_krea_clear_working_prompt", self.style)
