@@ -534,8 +534,8 @@ git diff --check
   `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`
 - Development branch: `develop`; stable public release branch: `main`;
   development prereleases may be tagged from `develop`
-- Current main prerelease: `v0.5.2-beta.2` (2026-10-06)
-- Previous main prerelease: `v0.5.2-beta.1` (2026-08-14)
+- Current main prerelease: `v0.5.2-beta.3` (2026-10-08)
+- Previous main prerelease: `v0.5.2-beta.2` (2026-10-06)
 - Previous development prerelease: `v0.5.2-alpha.1` (2026-08-13)
 - The extension's public name is now **Forgy — Forge Neo Prompt Studio**. The
   Python filename, Gradio element IDs, callback names, and internal Forge tab ID
@@ -612,6 +612,22 @@ validation remain open. The separate Qwen3.5-4B conditioning conversion still is
 not a drop-in speech backend by itself; the experimental Forgy provider works
 only through the explicitly selected, provenance-checked official causal runtime
 and tail described in the current 2026-08-28 handoff above.
+
+## Changes in v0.5.2-beta.3
+
+- Restored cached Forgy generation after Forge Neo 2.29.2 removed the
+  top-level `past_key_values` plumbing from its shared `Llama2_` forward path.
+- Added a request-local compatibility adapter that retains the older native
+  three-value Forge contract and uses the current core's unchanged
+  cache-capable transformer layers when required. Forge core remains unmodified.
+- Routed KREA2/Z-Image/FLUX.2 Klein text decoding and KREA2 multimodal
+  prefill/decoding through the shared compatibility boundary.
+- Added fail-closed cache validation and an optional current-Forge core test
+  proving that cached prefill-plus-decode matches the equivalent full-context
+  result when the extension is tested inside a Forge checkout.
+- Passed all 69 test cases locally, Ruff lint/format, Forge bootstrap, and the
+  user's restarted KREA2 Idea-to-Prompt smoke on the release candidate. The
+  three Forge/PyTorch KV contract cases skip cleanly in dependency-free CI.
 
 ## Changes in v0.5.2-beta.2
 
@@ -916,7 +932,8 @@ must be restarted to load the latest code.
 Before this handover, the following checks passed for the current development
 implementation:
 
-- 81 dependency-free `unittest` tests;
+- 101 `unittest` cases locally; the same 101-case discovery passes without site
+  packages with eight expected Forge/PyTorch-only skips;
 - Ruff lint check;
 - Ruff format check;
 - `git diff --check` (apart from Git's existing LF-to-CRLF warning for
@@ -944,7 +961,7 @@ git diff --check
 
 ## Recommended next steps
 
-1. Confirm that tag/release `v0.5.2-beta.2`, the `main` branch commit, and the
+1. Confirm that tag/release `v0.5.2-beta.3`, the `main` branch commit, and the
    GitHub Actions validation all refer to the same reviewed source state.
 2. Restart the user's Forge test instance and run one focused KREA2/Qwen3-VL
    smoke pass through all four workflows.
