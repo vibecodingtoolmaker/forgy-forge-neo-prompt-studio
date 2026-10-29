@@ -4,8 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-## 0.6.0-alpha.1 - 2026-10-29
+## 0.6.0-alpha.2 - 2026-10-29
 
+- Made fresh persona stores runtime-level Default-only. Forgy no longer seeds
+  `Ghost` or `Default Legacy`, and saving a normal persona does not add either
+  entry. Existing edited defaults and user-created local personas remain intact;
+  the four tracked examples still contain exactly one `Default` each.
 - Fixed a severe MOSS Qwen3.5 runtime dtype mismatch. Forge can store the token
   embedding in FP16 while the 32-layer transformer is BF16; Forgy previously
   followed the embedding dtype, causing Forge `manual_cast` to materialize
@@ -325,8 +329,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.6.0-alpha.1...HEAD
-[0.6.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.3...v0.6.0-alpha.1
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.6.0-alpha.2...HEAD
+[0.6.0-alpha.2]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.3...v0.6.0-alpha.2
 [0.5.2-beta.3]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.2...v0.5.2-beta.3
 [0.5.2-beta.2]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...v0.5.2-beta.2
 [0.5.2-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...v0.5.2-beta.1

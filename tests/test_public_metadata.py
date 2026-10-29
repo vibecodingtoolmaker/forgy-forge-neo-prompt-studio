@@ -42,8 +42,6 @@ def public_constants(source: str) -> dict[str, object]:
         "DEFAULT_IMAGE_PERSONA_PROMPT",
         "DEFAULT_REFINEMENT_PERSONA_PROMPT",
         "DEFAULT_AGENT_PERSONA_PROMPT",
-        "DEFAULT_AGENT_LEGACY_PERSONA_NAME",
-        "DEFAULT_AGENT_LEGACY_PERSONA_PROMPT",
         "FORGY_MAX_OUTPUT_TOKENS",
         "ANIMA_STOCK_MAX_OUTPUT_TOKENS",
         "MOSS_MAX_OUTPUT_TOKENS",
@@ -166,8 +164,6 @@ class PublicMetadataTests(unittest.TestCase):
                 "DEFAULT_IMAGE_PERSONA_PROMPT",
                 "DEFAULT_REFINEMENT_PERSONA_PROMPT",
                 "DEFAULT_AGENT_PERSONA_PROMPT",
-                "DEFAULT_AGENT_LEGACY_PERSONA_NAME",
-                "DEFAULT_AGENT_LEGACY_PERSONA_PROMPT",
                 "FORGY_MAX_OUTPUT_TOKENS",
                 "ANIMA_STOCK_MAX_OUTPUT_TOKENS",
                 "MOSS_MAX_OUTPUT_TOKENS",
@@ -180,9 +176,9 @@ class PublicMetadataTests(unittest.TestCase):
             self.constants["EXTENSION_NAME"],
             "Forgy — Forge Neo Prompt Studio",
         )
-        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.6.0-alpha.1")
+        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.6.0-alpha.2")
         self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
-        self.assertIn("**Alpha 0.6.0-alpha.1 (development prerelease)**", self.readme)
+        self.assertIn("**Alpha 0.6.0-alpha.2 (development prerelease)**", self.readme)
         self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
         self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
         self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))
@@ -268,16 +264,6 @@ class PublicMetadataTests(unittest.TestCase):
             self.agent_personas["personas"]["Default"],
             self.constants["DEFAULT_AGENT_PERSONA_PROMPT"],
         )
-        legacy_name = self.constants["DEFAULT_AGENT_LEGACY_PERSONA_NAME"]
-        self.assertEqual(legacy_name, "Default Legacy")
-        self.assertNotIn(legacy_name, self.agent_personas["personas"])
-        legacy_hash = hashlib.sha256(
-            self.constants["DEFAULT_AGENT_LEGACY_PERSONA_PROMPT"].encode("utf-8")
-        ).hexdigest()
-        self.assertIn(
-            f'"{legacy_hash}": DEFAULT_AGENT_PERSONA_PROMPT',
-            self.source,
-        )
 
     def test_unchanged_legacy_defaults_migrate_without_touching_custom_personas(
         self,
@@ -296,9 +282,6 @@ class PublicMetadataTests(unittest.TestCase):
             "PERSONAS_PATH": Path("unused-personas.json"),
             "DEFAULT_PERSONA_PROMPT": neutral_default,
             "LEGACY_DEFAULT_PROMPT_MIGRATIONS": {legacy_hash: neutral_default},
-            "BUILTIN_PERSONA_BACKUPS": {
-                neutral_default: {"Default Legacy": legacy_default}
-            },
             "PERSONA_LOCK": threading.RLock(),
             "PromptAssistantError": error_type,
             "LOGGER": SimpleNamespace(info=lambda *args, **kwargs: None),
@@ -315,7 +298,21 @@ class PublicMetadataTests(unittest.TestCase):
         ):
             isolated_function(self.source, function_name, namespace)
 
+        self.assertEqual(
+            namespace["_default_persona_store"](neutral_default),
+            {"version": 1, "personas": {"Default": neutral_default}},
+        )
+
         with TemporaryDirectory() as temporary_directory:
+            fresh_path = Path(temporary_directory) / "fresh-personas.json"
+            namespace["_write_persona_store"](
+                {
+                    "Default": neutral_default,
+                    "User style": "Keep this custom prompt.",
+                },
+                fresh_path,
+            )
+            fresh_store = json.loads(fresh_path.read_text(encoding="utf-8"))
             path = Path(temporary_directory) / "personas.json"
             path.write_text(
                 json.dumps(
@@ -333,13 +330,16 @@ class PublicMetadataTests(unittest.TestCase):
             migrated = namespace["_read_persona_store"](path, neutral_default)
             persisted = json.loads(path.read_text(encoding="utf-8"))
 
+        self.assertEqual(set(fresh_store["personas"]), {"Default", "User style"})
         self.assertEqual(migrated["personas"]["Default"], neutral_default)
-        self.assertEqual(migrated["personas"]["Default Legacy"], legacy_default)
+        self.assertEqual(migrated["personas"]["Ghost"], "")
         self.assertEqual(migrated["personas"]["User style"], "Keep this custom prompt.")
         self.assertEqual(persisted, migrated)
 
     def test_public_examples_contain_only_the_default_persona(self) -> None:
         self.assertEqual(self.constants["GHOST_PERSONA_NAME"], "Ghost")
+        self.assertNotIn("BUILTIN_PERSONA_BACKUPS", self.source)
+        self.assertNotIn("DEFAULT_AGENT_LEGACY_PERSONA_PROMPT", self.source)
         for personas in (
             self.personas,
             self.image_personas,

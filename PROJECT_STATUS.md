@@ -115,7 +115,7 @@ chat. Read `AGENTS.md` before changing the project.
 - Broader sampling quality, cancellation, lower-VRAM hardware, diverse real-image
   inputs, and extended long-running native generation remain untested.
 - The feature work is secured in commit `01f0898`, and the public beta.3 hotfix
-  is reconciled by merge commit `1d1508a`. The `v0.6.0-alpha.1` release candidate
+  is reconciled by merge commit `1d1508a`. The `v0.6.0-alpha.2` release candidate
   changes only this nested extension. No Forge core file, selected model option,
   local persona store, model weight, or generated image is included.
 
@@ -541,7 +541,7 @@ git diff --check
   `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`
 - Development branch: `develop`; stable public release branch: `main`;
   development prereleases may be tagged from `develop`
-- Current development prerelease: `v0.6.0-alpha.1` (2026-10-29)
+- Current development prerelease: `v0.6.0-alpha.2` (2026-10-29)
 - Current main prerelease: `v0.5.2-beta.3` (2026-10-08)
 - Previous main prerelease: `v0.5.2-beta.2` (2026-10-06)
 - The extension's public name is now **Forgy — Forge Neo Prompt Studio**. The
@@ -578,12 +578,11 @@ All workflows have independent, user-managed persona stores. The selected
 persona is the complete system prompt. A model adapter may add a narrow,
 documented workflow contract to the user request when its encoder needs clearer
 task boundaries; it does not replace the persona or add a hidden style persona.
-`Default` is protected, and the reserved `Ghost` persona is the only persona
-allowed to have an empty system prompt. Forgy Chat's combined specialist is now
-its built-in `Default`; the former unchanged default is retained as `Default
-Legacy`, with exact-hash migration that preserves edited and custom personas.
-Persona editor selection is independent from the persona currently used for
-generation.
+`Default` is protected. Fresh installations seed only the four workflow-specific
+defaults; no testing or legacy persona is added automatically. Exact-hash
+migration updates only unchanged old defaults, while edited defaults and all
+user-created local personas remain intact. Persona editor selection is
+independent from the persona currently used for generation.
 
 The development branch supports KREA2 with its Forge-owned Qwen3-VL 4B
 text/vision encoder plus text-only Z-Image Base/Turbo, FLUX.2 Klein 4B/Base 4B,
@@ -872,9 +871,6 @@ following risks remain:
   Qwen3-VL 4B encoder can still hallucinate, become repetitive, or produce a
   malformed Forgy protocol. Current guards bound common failures but do not turn
   the diffusion encoder into a general chat model.
-- With `Ghost`, the Forgy protocol is normally absent; the raw reply is shown
-  and the working prompt is intentionally preserved. This can look like a
-  failed prompt update but is expected behavior.
 - Z-Image is currently text-only and has had one bounded Base live smoke. Turbo
   shares the validated static runtime contract but has not received a separate
   Forgy text-generation smoke in this change. Tag-oriented model-family
@@ -968,15 +964,15 @@ git diff --check
 
 ## Recommended next steps
 
-1. Confirm that tag/release `v0.6.0-alpha.1`, the `develop` branch commit, and
+1. Confirm that tag/release `v0.6.0-alpha.2`, the `develop` branch commit, and
    the GitHub Actions validation all refer to the same reviewed source state.
 2. Restart the user's Forge test instance and run one focused KREA2/Qwen3-VL
    smoke pass through all four workflows.
 3. Specifically verify each `+ generate` button remains locked only until the
    new image reaches the correct gallery, then re-enables with a success check.
 4. Re-test the image lightbox, both Grab actions, prompt-only clear, transient
-   label resets, Forgy autoscroll, Stop, Undo, conversation clear, persona
-   create/edit/delete, `Ghost`, and `Default Legacy` preservation.
+   label resets, Forgy autoscroll, Stop, Undo, conversation clear, and persona
+   create/edit/delete behavior.
 5. Inspect `git status`, the complete diff, and ignored local persona data.
    Ensure no `personas.json`, `image_personas.json`,
    `refinement_personas.json`, `agent_personas.json`, generated image, log, or

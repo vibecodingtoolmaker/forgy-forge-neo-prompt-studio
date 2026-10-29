@@ -1,6 +1,6 @@
 # Forgy — Forge Neo Prompt Studio
 
-**Alpha 0.6.0-alpha.1 (development prerelease)**
+**Alpha 0.6.0-alpha.2 (development prerelease)**
 
 [![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=develop)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
@@ -279,14 +279,12 @@ request shown in its placeholder. In `Refine prompt`, the current prompt and the
 
 The focused Idea-to-Prompt, Image-to-Prompt, and Refine stores keep their
 workflow-specific `Default` prompts. Forgy Chat's `Default` combines idea
-expansion, image analysis, and prompt refinement in one interactive persona. Its
-former built-in prompt remains available as `Default Legacy`. An unchanged old
-Forgy default migrates by exact known hash; edited defaults and custom personas
-are preserved. `Default` can be edited but not deleted. The built-in `Ghost`
-persona has an intentionally empty system prompt for direct, unguided encoder
-experiments and cannot be edited into a non-empty persona or deleted. Other
-personas still require a non-empty system prompt. Users can create, edit, and
-delete additional personas in the UI.
+expansion, image analysis, and prompt refinement in one interactive persona. A
+fresh installation receives only these four workflow-specific defaults; no
+additional testing or legacy persona is seeded. An unchanged old Default may be
+migrated by exact known hash, while edited defaults and every user-created local
+persona are preserved. `Default` can be edited but not deleted. Users can create,
+edit, and delete additional personas in the UI.
 
 Idea personas are stored locally in `personas.json`; image personas use
 `image_personas.json`; refinement personas use `refinement_personas.json`; Forgy
@@ -380,11 +378,6 @@ looping, generation stops early with the finish reason
 only in the explicitly enabled, request-local testing diagnostic described
 above. These guardrails keep a weak turn bounded; they cannot make the 4B
 encoder reason like a larger conversational model.
-
-Selecting `Ghost` in Forgy removes those system-level response instructions.
-The raw reply remains visible, but Forgy's automatic working-prompt update will
-normally preserve the current prompt because the expected response markers may
-be absent.
 
 Prompt changes — including the small prompt-clear action and an explicit prompt
 grab — are kept in a bounded, session-only version list so `Undo prompt change`

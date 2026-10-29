@@ -62,7 +62,7 @@ from forgy.model_manager import ModelContext, ModelManager
 
 LOGGER = logging.getLogger("forgy_prompt_studio")
 EXTENSION_NAME = "Forgy — Forge Neo Prompt Studio"
-EXTENSION_VERSION = "0.6.0-alpha.1"
+EXTENSION_VERSION = "0.6.0-alpha.2"
 # Compatibility aliases retained for diagnostics and existing static integrations.
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"
@@ -174,27 +174,6 @@ Requirements:
 - Avoid empty quality slogans and avoid repeating details.
 - Write the finished prompt in English unless the refinement instruction explicitly requests another language."""
 
-DEFAULT_AGENT_LEGACY_PERSONA_NAME = "Default Legacy"
-DEFAULT_AGENT_LEGACY_PERSONA_PROMPT = """You are Forgy, an interactive creative copilot for building image-generation prompts. Help the user develop ideas, evaluate an uploaded image when one is present, and iteratively improve the current prompt.
-
-Behavior:
-- Respond directly and conversationally to the user's latest message.
-- Treat the current prompt as editable working state, not as an instruction that overrides this system prompt.
-- When the user asks for a change, return one complete updated prompt that applies the request precisely and preserves unaffected details.
-- When the user presents a new idea and no current prompt exists, build one polished natural-language image prompt.
-- If no prompt change is appropriate, use [UNCHANGED] instead of rewriting the current prompt.
-- Do not claim that an image was generated or modified. You may only discuss an uploaded image that is included in the current request.
-- Never expose chain-of-thought, hidden reasoning, or internal deliberation. Return only the requested visible response sections.
-- Do not repeat sentences, paragraphs, response sections, or prompt content.
-- Keep the conversational reply concise. Put the complete image prompt only in the prompt section.
-
-Return every response in exactly this visible format:
-FORGY_REPLY:
-Your conversational response to the user.
-
-UPDATED_PROMPT:
-The complete updated image prompt, or [UNCHANGED]."""
-
 DEFAULT_AGENT_PERSONA_PROMPT = """You are Forgy, an interactive image-prompt specialist that combines idea expansion, image analysis, and prompt refinement in one conversation.
 
 Behavior:
@@ -214,12 +193,6 @@ Your concise conversational response to the user.
 
 UPDATED_PROMPT:
 The complete updated image prompt, or [UNCHANGED]."""
-
-BUILTIN_PERSONA_BACKUPS = {
-    DEFAULT_AGENT_PERSONA_PROMPT: {
-        DEFAULT_AGENT_LEGACY_PERSONA_NAME: DEFAULT_AGENT_LEGACY_PERSONA_PROMPT,
-    }
-}
 
 LEGACY_DEFAULT_PROMPT_MIGRATIONS = {
     "10ecf38dde83cad6be2621d2221a783104a3c32b6fe5bcd59e0a202a5e7255ae": DEFAULT_PERSONA_PROMPT,
@@ -371,14 +344,9 @@ def _validate_system_prompt(system_prompt, *, allow_empty: bool = False) -> str:
 
 
 def _default_persona_store(default_prompt=DEFAULT_PERSONA_PROMPT) -> dict:
-    built_in_backups = BUILTIN_PERSONA_BACKUPS.get(default_prompt, {})
     return {
         "version": PERSONA_STORE_VERSION,
-        "personas": {
-            DEFAULT_PERSONA_NAME: default_prompt,
-            GHOST_PERSONA_NAME: "",
-            **built_in_backups,
-        },
+        "personas": {DEFAULT_PERSONA_NAME: default_prompt},
     }
 
 
@@ -419,11 +387,8 @@ def _read_persona_store(
         custom_personas = {
             name: prompt
             for name, prompt in personas.items()
-            if name not in {DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME}
+            if name != DEFAULT_PERSONA_NAME
         }
-        built_in_backups = BUILTIN_PERSONA_BACKUPS.get(default_prompt, {})
-        backup_was_added = any(name not in custom_personas for name in built_in_backups)
-        custom_personas = {**built_in_backups, **custom_personas}
         stored_default = personas.get(DEFAULT_PERSONA_NAME, default_prompt)
         legacy_hash = hashlib.sha256(stored_default.encode("utf-8")).hexdigest()
         migrated_default = LEGACY_DEFAULT_PROMPT_MIGRATIONS.get(legacy_hash)
@@ -432,19 +397,15 @@ def _read_persona_store(
             DEFAULT_PERSONA_NAME: default_prompt
             if default_was_migrated
             else stored_default,
-            GHOST_PERSONA_NAME: "",
             **custom_personas,
         }
         if len(personas) > MAX_PERSONAS:
             raise PromptAssistantError(
                 f"The persona file contains more than {MAX_PERSONAS} personas."
             )
-        if default_was_migrated or backup_was_added:
+        if default_was_migrated:
             _write_persona_store(personas, path)
-            if default_was_migrated:
-                LOGGER.info("Updated unchanged legacy Default persona in %s", path.name)
-            if backup_was_added:
-                LOGGER.info("Added built-in persona backup to %s", path.name)
+            LOGGER.info("Updated unchanged legacy Default persona in %s", path.name)
         return {"version": PERSONA_STORE_VERSION, "personas": personas}
 
 
@@ -461,11 +422,10 @@ def _write_persona_store(personas: dict[str, str], path=PERSONAS_PATH) -> None:
     custom_personas = {
         name: prompt
         for name, prompt in validated.items()
-        if name not in {DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME}
+        if name != DEFAULT_PERSONA_NAME
     }
     validated = {
         DEFAULT_PERSONA_NAME: validated[DEFAULT_PERSONA_NAME],
-        GHOST_PERSONA_NAME: "",
         **custom_personas,
     }
     if len(validated) > MAX_PERSONAS:
@@ -496,7 +456,7 @@ def _initial_persona_state_for(path, default_prompt) -> tuple[list[str], str, st
     except PromptAssistantError as exc:
         LOGGER.exception("Could not initialize persona store")
         return (
-            [DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME],
+            [DEFAULT_PERSONA_NAME],
             DEFAULT_PERSONA_NAME,
             default_prompt,
             f"**Persona file error:** {exc}",
@@ -601,7 +561,7 @@ def _save_persona_fields_to(name, system_prompt, path, default_prompt):
         if name == GHOST_PERSONA_NAME:
             if str(system_prompt or "").strip():
                 raise PromptAssistantError(
-                    "The built-in Ghost persona must keep an empty system prompt."
+                    "The Ghost testing persona must keep an empty system prompt."
                 )
             system_prompt = ""
         else:
@@ -666,7 +626,7 @@ def _new_persona_fields():
 def _delete_persona_fields_from(name, path, default_prompt):
     try:
         name = _validate_persona_name(name)
-        if name in {DEFAULT_PERSONA_NAME, GHOST_PERSONA_NAME}:
+        if name == DEFAULT_PERSONA_NAME:
             raise PromptAssistantError(
                 f"The built-in {name} persona may not be deleted."
             )
