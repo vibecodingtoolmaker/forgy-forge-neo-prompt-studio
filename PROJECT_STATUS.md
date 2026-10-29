@@ -90,12 +90,20 @@ chat. Read `AGENTS.md` before changing the project.
 - A following non-profile production-path smoke also passed with the selected
   local persona: 369 input tokens, 16 output tokens, the expected visible fox
   prompt prefix, and `MOSS_TEXT_GENERATION_OK`.
+- After restarting the normal Forge UI, the maintainer confirmed that every
+  locally configured Idea-to-Prompt persona completed successfully and judged
+  the resulting MOSS prose prompts to produce very good results.
+- The maintainer also confirmed the visible MOSS Image-to-Prompt workflow. The
+  tested custom personas remain only in the four ignored local persona stores;
+  each tracked example file contains exactly its workflow's `Default` persona.
 - `unittest discover -s tests -v`: 101 tests passed. Ruff lint and format checks
-  passed across 30 Python files. The Forge bootstrap registered all five adapters
-  and printed `NO_PERSISTENT_MODEL_CONTEXT_OK`. A model-free Gradio build smoke
-  constructed exactly four MOSS negative fields and four transfer checkboxes and
-  printed `FORGY_MOSS_NEGATIVE_UI_BUILD_OK 4`. `git diff --check` reported no
-  whitespace errors, only the pre-existing `style.css` LF-to-CRLF warning.
+  passed across 30 Python files. The dependency-free `python -S` discovery also
+  passed all 101 cases with eight expected Forge/PyTorch-only skips. The Forge
+  bootstrap registered all five adapters and printed
+  `NO_PERSISTENT_MODEL_CONTEXT_OK`. A model-free Gradio build smoke constructed
+  exactly four MOSS negative fields and four transfer checkboxes and printed
+  `FORGY_MOSS_NEGATIVE_UI_BUILD_OK 4`. `git diff --check` reported no whitespace
+  errors, only the pre-existing `style.css` LF-to-CRLF warning.
 
 ### Boundaries and repository state
 
@@ -104,13 +112,12 @@ chat. Read `AGENTS.md` before changing the project.
   projection can be reused without materializing a guessed dense copy.
 - The selected local BF16 encoder contains 760 tensors and no MTP tensors. A
   speculative MTP port would therefore provide no benefit for this real stack.
-- Visible post-restart Gradio use, broader sampling quality, cancellation,
-  lower-VRAM hardware, real-photo MOSS vision quality, and a following native
-  image generation in the same long-lived Forge process remain untested.
-- Work remains uncommitted in the intentionally dirty nested `develop` checkout,
-  which is still one commit behind `origin/develop`. No Forge core file, selected
-  model option, persona file, model weight, commit, tag, push, or release was
-  changed.
+- Broader sampling quality, cancellation, lower-VRAM hardware, diverse real-image
+  inputs, and extended long-running native generation remain untested.
+- The feature work is secured in commit `01f0898`, and the public beta.3 hotfix
+  is reconciled by merge commit `1d1508a`. The `v0.6.0-alpha.1` release candidate
+  changes only this nested extension. No Forge core file, selected model option,
+  local persona store, model weight, or generated image is included.
 
 ## Tagesabschluss 2026-10-08 — Forge Neo 2.29.2 KV hotfix
 
@@ -534,18 +541,18 @@ git diff --check
   `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`
 - Development branch: `develop`; stable public release branch: `main`;
   development prereleases may be tagged from `develop`
+- Current development prerelease: `v0.6.0-alpha.1` (2026-10-29)
 - Current main prerelease: `v0.5.2-beta.3` (2026-10-08)
 - Previous main prerelease: `v0.5.2-beta.2` (2026-10-06)
-- Previous development prerelease: `v0.5.2-alpha.1` (2026-08-13)
 - The extension's public name is now **Forgy — Forge Neo Prompt Studio**. The
   Python filename, Gradio element IDs, callback names, and internal Forge tab ID
   still contain `forge_krea_prompt_assistant` or `forge-krea` on purpose.
   Existing installations may also retain their original directory name.
   Renaming those identifiers is a separate compatibility migration.
 
-The Beta 0.5.2 main prerelease includes the main script, modular
+The Alpha 0.6 development prerelease includes the main script, modular
 `forgy` package, architecture document, tests, public documentation, metadata,
-issue forms, all four persona examples, license header, security policy,
+issue forms, four Default-only persona examples, license header, security policy,
 roadmap, changelog, `.gitignore`, `style.css`, this status file, and `AGENTS.md`.
 In a fresh checkout these files must all be tracked. Local persona stores and
 generated/runtime files must remain ignored.
@@ -961,8 +968,8 @@ git diff --check
 
 ## Recommended next steps
 
-1. Confirm that tag/release `v0.5.2-beta.3`, the `main` branch commit, and the
-   GitHub Actions validation all refer to the same reviewed source state.
+1. Confirm that tag/release `v0.6.0-alpha.1`, the `develop` branch commit, and
+   the GitHub Actions validation all refer to the same reviewed source state.
 2. Restart the user's Forge test instance and run one focused KREA2/Qwen3-VL
    smoke pass through all four workflows.
 3. Specifically verify each `+ generate` button remains locked only until the
@@ -975,7 +982,8 @@ git diff --check
    `refinement_personas.json`, `agent_personas.json`, generated image, log, or
    personal path is staged.
 6. Run the four automated commands above before any follow-up release.
-7. Triage Beta 0.5.2 feedback without mixing unrelated fixes into one release.
+7. Triage Alpha 0.6 and remaining Beta 0.5.2 feedback without mixing unrelated
+   fixes into one release.
 8. Restart an isolated Forge UI, switch between KREA2, Z-Image, Klein 4B, and
    stock Anima, and verify
    capability-driven buttons, image inputs, status text, and Default persona

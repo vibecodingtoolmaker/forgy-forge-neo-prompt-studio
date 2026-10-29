@@ -1,8 +1,8 @@
 # Forgy — Forge Neo Prompt Studio
 
-**Beta 0.5.2-beta.3 (main prerelease)**
+**Alpha 0.6.0-alpha.1 (development prerelease)**
 
-[![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
+[![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=develop)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
 A Forge Neo extension that turns a short image idea or an uploaded reference
 image into a polished image-generation prompt and can iteratively refine an
@@ -15,18 +15,16 @@ request. The optional experimental
 Anima/Qwen3.5 speech path reuses one model already cached by the separately
 installed Qwen3.5 Anima adapter.
 
-This beta adds an explicit modular adapter architecture and
-text-only Z-Image Base/Turbo, FLUX.2 Klein 4B, stock Anima/Qwen3-0.6B, and an
-experimental MOSS-Image/Qwen3.5-9B text/vision
-adapters to the established
-Forgy Chat, Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement workflows. It
-has not yet been tested across a broad range of GPUs and Forge Neo
-configurations.
+The highlight of this alpha is the experimental MOSS-Image/Qwen3.5-9B adapter.
+It brings the active MOSS text and vision encoder to Forgy Chat,
+Idea-to-Prompt, Image-to-Prompt, and Prompt Refinement, including editable,
+prompt-aware negative suggestions. The release also includes text-only Z-Image
+Base/Turbo, FLUX.2 Klein 4B, and stock Anima/Qwen3-0.6B adapters. It has not yet
+been tested across a broad range of GPUs and Forge Neo configurations.
 
-This hotfix restores cached prompt generation after Forge Neo 2.29.2 changed
-the shared Llama forward contract. Forgy now supports both Forge's earlier
-top-level KV-cache return and the current per-layer cache path. No Forge core
-changes or additional model loads are required.
+Forgy supports both Forge's earlier top-level KV-cache return and the current
+Forge Neo 2.29.2 per-layer cache path. No Forge core changes or additional
+durable model loads are required.
 
 ## Welcome
 
@@ -55,7 +53,7 @@ user data to Codex. This project is not affiliated with or endorsed by OpenAI.
   VAE files available in Forge's configured model directories;
 - a CUDA-capable GPU supported by the Forge installation.
 
-Development and current hotfix testing target Forge Neo 2.29.2.
+Development and current testing target Forge Neo 2.29.2.
 
 The KREA2 adapter supports its Qwen3-VL 4B text/vision encoder and a compatible
 VAE across all four workflows. The initial Z-Image Base/Turbo adapter reuses
@@ -490,11 +488,12 @@ framework determinism.
   native Forge generation inputs, normal Klein image generation still needs a
   recorded smoke, and Klein 9B is not supported without its discarded untied
   LM head;
-- MOSS text, 64-token, and synthetic-image smokes pass on an RTX 5090, but
-  visible Gradio, real-photo prompt quality, broader sampling, cancellation,
-  and lower-VRAM/offload behavior still need live testing; the selected local
-  encoder contains no MTP tensors, so speculative decoding is not available for
-  that stack;
+- MOSS text, 64-token, synthetic-image, visible Idea-to-Prompt, and visible
+  Image-to-Prompt smokes pass on an RTX 5090. The maintainer also confirmed all
+  locally configured Idea personas and strong prose-prompt quality. Broader
+  sampling, cancellation, diverse real-image inputs, and lower-VRAM/offload
+  behavior still need live testing; the selected local encoder contains no MTP
+  tensors, so speculative decoding is not available for that stack;
 - no persistent local generation history; Forgy keeps only bounded session undo versions;
 - Forgy never starts a Forge image generation autonomously; the user must click
   an explicit `replace + generate` or `append + generate` action;

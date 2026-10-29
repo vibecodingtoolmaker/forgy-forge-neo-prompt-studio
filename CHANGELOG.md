@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.6.0-alpha.1 - 2026-10-29
+
 - Fixed a severe MOSS Qwen3.5 runtime dtype mismatch. Forge can store the token
   embedding in FP16 while the 32-layer transformer is BF16; Forgy previously
   followed the embedding dtype, causing Forge `manual_cast` to materialize
@@ -24,10 +26,11 @@ All notable changes to this project will be documented in this file.
   exactly one selected additional module for the request, requires full
   single-device backbone placement, and fails closed for quantized, missing, or
   ambiguous heads. Image-to-Prompt reuses Forge's active vision encoder and
-  Qwen3.5 three-axis MRoPE. RTX 5090 text and synthetic-image smokes returned
-  clean visible output; synchronized four-token text runs took 15.1 to 20.5
-  seconds and the image run took 34.9 seconds. The local encoder contains no MTP tensors, leaving the
-  9B execution path as an explicit optimization gap.
+  Qwen3.5 three-axis MRoPE. RTX 5090 text, 64-token, synthetic-image, visible
+  Idea-to-Prompt, and visible Image-to-Prompt smokes returned clean output. The
+  maintainer confirmed all locally configured Idea personas and strong prose
+  prompt quality. The local encoder contains no MTP tensors, so speculative
+  decoding is unavailable for that stack.
 - Allowed MOSS-specific personas to choose either cohesive captions or ordered
   tag sequences. The MOSS workflow contracts no longer override a tag persona
   with a natural-language-only instruction, and refinement preserves the active
@@ -322,7 +325,8 @@ All notable changes to this project will be documented in this file.
 - Added public repository metadata, AGPL licensing, and AI-development
   transparency documentation.
 
-[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.3...HEAD
+[Unreleased]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.6.0-alpha.1...HEAD
+[0.6.0-alpha.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.3...v0.6.0-alpha.1
 [0.5.2-beta.3]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.2...v0.5.2-beta.3
 [0.5.2-beta.2]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-beta.1...v0.5.2-beta.2
 [0.5.2-beta.1]: https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/compare/v0.5.2-alpha.1...v0.5.2-beta.1
