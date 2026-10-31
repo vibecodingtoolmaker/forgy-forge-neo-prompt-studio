@@ -1,9 +1,27 @@
 # Project Status: Forgy — Forge Neo Prompt Studio
 
-Last updated: 2026-10-29
+Last updated: 2026-10-31
 
 This file is the handover document for continuing development in a new Codex
 chat. Read `AGENTS.md` before changing the project.
+
+## Hotfix release 2026-10-31 — v0.6.0-alpha.3
+
+- Fixed the KREA2 Idea-to-Prompt and Image-to-Prompt empty-output regression
+  introduced by the shared MOSS/Qwen thinking diagnostics. A trailing generated
+  `</think>` token is removed without discarding the valid visible prompt that
+  precedes it in normal no-thinking mode.
+- Explicit thinking mode and unexpected reasoning followed by visible text still
+  hide the private prefix. The same contract is tested for KREA2, Z-Image,
+  FLUX.2 Klein, Anima, and MOSS; MOSS's request-local thinking cleanup and
+  Forge-owned model lifecycle remain unchanged.
+- Image output cleanup now uses the adapter resolved in the request-local model
+  context instead of a hard-coded KREA2 adapter.
+- The exact release candidate passed 102 Forge-environment tests, dependency-free
+  discovery with eight expected Forge/PyTorch-only skips, Ruff lint and format,
+  Forge bootstrap, and `git diff --check`. The maintainer also tested the hotfix
+  in the live Forge setup and reported that the previously blank KREA2 output now
+  works.
 
 ## Tagesfortschritt 2026-10-29 — experimental MOSS-Image text/vision adapter
 
@@ -541,9 +559,9 @@ git diff --check
   `https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio`
 - Development branch: `develop`; stable public release branch: `main`;
   development prereleases may be tagged from `develop`
-- Current development prerelease: `v0.6.0-alpha.2` (2026-10-29)
-- Current main prerelease: `v0.5.2-beta.3` (2026-10-08)
-- Previous main prerelease: `v0.5.2-beta.2` (2026-10-06)
+- Current development prerelease: `v0.6.0-alpha.3` (2026-10-31)
+- Current main prerelease: `v0.6.0-alpha.3` (2026-10-31)
+- Previous main prerelease: `v0.6.0-alpha.2` (2026-10-29)
 - The extension's public name is now **Forgy — Forge Neo Prompt Studio**. The
   Python filename, Gradio element IDs, callback names, and internal Forge tab ID
   still contain `forge_krea_prompt_assistant` or `forge-krea` on purpose.
@@ -964,7 +982,7 @@ git diff --check
 
 ## Recommended next steps
 
-1. Confirm that tag/release `v0.6.0-alpha.2`, the `develop` branch commit, and
+1. Confirm that tag/release `v0.6.0-alpha.3`, the `develop` branch commit, and
    the GitHub Actions validation all refer to the same reviewed source state.
 2. Restart the user's Forge test instance and run one focused KREA2/Qwen3-VL
    smoke pass through all four workflows.

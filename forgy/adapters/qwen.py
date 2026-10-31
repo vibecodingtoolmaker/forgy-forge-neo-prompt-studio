@@ -40,8 +40,19 @@ def decode_generated_text(tokenizer, generated_ids) -> str:
     return text.strip()
 
 
-def strip_model_thinking(text: str) -> tuple[str, bool]:
-    """Remove visible Qwen reasoning before returning model output."""
+def strip_model_thinking(
+    text: str,
+    *,
+    prefilled_thinking: bool = False,
+) -> tuple[str, bool]:
+    """Remove visible Qwen reasoning without discarding normal prompt text.
+
+    Thinking mode pre-fills the opening ``<think>`` token in the request, so a
+    generated standalone closing token terminates private reasoning. In normal
+    no-thinking mode the complete empty block was already part of the request.
+    A trailing standalone close is therefore only stripped, while non-empty text
+    after a close still identifies and removes an unexpected reasoning prefix.
+    """
 
     text = str(text or "")
     removed = False
@@ -64,25 +75,24 @@ def strip_model_thinking(text: str) -> tuple[str, bool]:
         text = text[: unmatched_open.start()]
         removed = True
 
-    # In Qwen's thinking template the opening ``<think>`` is part of the input
-    # prefix. Generated tokens therefore commonly contain reasoning followed by
-    # only ``</think>`` and the visible answer.
     dangling_close = re.search(
         r"</(?:think|analysis)\s*>",
         text,
         flags=re.IGNORECASE,
     )
     if dangling_close:
-        text = text[dangling_close.end() :]
-        removed = True
+        text_after_close = text[dangling_close.end() :]
+        if prefilled_thinking or text_after_close.strip():
+            text = text_after_close
+            removed = True
 
-    text = re.sub(
+    text, dangling_closes = re.subn(
         r"</(?:think|analysis)\s*>",
         "",
         text,
         flags=re.IGNORECASE,
     )
-    return text.strip(), removed
+    return text.strip(), removed or bool(dangling_closes)
 
 
 def repetition_loop_suffix(token_ids: list[int]) -> tuple[int, int] | None:

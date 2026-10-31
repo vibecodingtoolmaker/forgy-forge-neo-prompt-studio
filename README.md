@@ -1,6 +1,6 @@
 # Forgy — Forge Neo Prompt Studio
 
-**Alpha 0.6.0-alpha.2 (development prerelease)**
+**Alpha 0.6.0-alpha.3 (development prerelease)**
 
 [![Validate](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml/badge.svg?branch=develop)](https://github.com/vibecodingtoolmaker/forgy-forge-neo-prompt-studio/actions/workflows/validate.yml)
 
@@ -25,6 +25,11 @@ been tested across a broad range of GPUs and Forge Neo configurations.
 Forgy supports both Forge's earlier top-level KV-cache return and the current
 Forge Neo 2.29.2 per-layer cache path. No Forge core changes or additional
 durable model loads are required.
+
+Alpha.3 is a focused hotfix for KREA2 Idea-to-Prompt and Image-to-Prompt output
+that could appear empty after the MOSS thinking-diagnostics update. The shared
+cleanup now preserves a valid visible prompt while continuing to hide private
+reasoning for every supported Qwen-family adapter.
 
 ## Welcome
 

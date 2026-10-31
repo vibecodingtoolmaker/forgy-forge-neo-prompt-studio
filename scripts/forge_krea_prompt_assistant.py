@@ -62,7 +62,7 @@ from forgy.model_manager import ModelContext, ModelManager
 
 LOGGER = logging.getLogger("forgy_prompt_studio")
 EXTENSION_NAME = "Forgy — Forge Neo Prompt Studio"
-EXTENSION_VERSION = "0.6.0-alpha.2"
+EXTENSION_VERSION = "0.6.0-alpha.3"
 # Compatibility aliases retained for diagnostics and existing static integrations.
 KREA2_ENCODER_MODULE = "backend.nn.llm.llama"
 KREA2_ENCODER_CLASS = "Qwen3VL"
@@ -1034,15 +1034,25 @@ def _decode_generated_text(tokenizer, generated_ids) -> str:
     return KREA2_ADAPTER.decode_generated_text(tokenizer, generated_ids)
 
 
-def _strip_model_thinking(text: str) -> tuple[str, bool]:
-    return KREA2_ADAPTER.strip_model_thinking(text)
+def _strip_model_thinking(
+    text: str,
+    *,
+    prefilled_thinking: bool = False,
+) -> tuple[str, bool]:
+    return KREA2_ADAPTER.strip_model_thinking(
+        text,
+        prefilled_thinking=prefilled_thinking,
+    )
 
 
 def _prepare_model_output(adapter, text, show_model_thinking):
     """Keep the working result clean while optionally exposing decoded output."""
 
     raw_model_output = str(text or "").strip() if show_model_thinking else ""
-    visible_text, thinking_hidden = adapter.strip_model_thinking(text)
+    visible_text, thinking_hidden = adapter.strip_model_thinking(
+        text,
+        prefilled_thinking=bool(show_model_thinking),
+    )
     return visible_text, raw_model_output, thinking_hidden
 
 
@@ -3231,7 +3241,7 @@ def _run_image_generation(
         _clear_generation_request(generation_id)
 
     text, raw_model_output, thinking_hidden = _prepare_model_output(
-        KREA2_ADAPTER,
+        model_context.adapter,
         text,
         show_model_thinking,
     )

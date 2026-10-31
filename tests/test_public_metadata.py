@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from forgy.adapters import Krea2Adapter
+from forgy.adapters import Krea2Adapter, MossAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "forge_krea_prompt_assistant.py"
@@ -176,9 +176,9 @@ class PublicMetadataTests(unittest.TestCase):
             self.constants["EXTENSION_NAME"],
             "Forgy — Forge Neo Prompt Studio",
         )
-        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.6.0-alpha.2")
+        self.assertEqual(self.constants["EXTENSION_VERSION"], "0.6.0-alpha.3")
         self.assertIn("# Forgy — Forge Neo Prompt Studio", self.readme)
-        self.assertIn("**Alpha 0.6.0-alpha.2 (development prerelease)**", self.readme)
+        self.assertIn("**Alpha 0.6.0-alpha.3 (development prerelease)**", self.readme)
         self.assertIn("Name = Forgy — Forge Neo Prompt Studio", self.metadata)
         self.assertIn("Forgy — Forge Neo Prompt Studio", self.security)
         self.assertTrue(self.license.startswith("Forgy — Forge Neo Prompt Studio\n"))
@@ -1126,8 +1126,23 @@ class PublicMetadataTests(unittest.TestCase):
 
         cleaned, raw_output, removed = prepare_output(Krea2Adapter(), decoded, False)
         self.assertTrue(removed)
+        self.assertNotIn("private reasoning", cleaned)
         self.assertIn("Visible answer.", cleaned)
         self.assertEqual(raw_output, "")
+
+        krea_output = "A polished KREA2 image prompt.</think>"
+        cleaned, raw_output, removed = prepare_output(
+            Krea2Adapter(), krea_output, False
+        )
+        self.assertTrue(removed)
+        self.assertEqual(cleaned, "A polished KREA2 image prompt.")
+        self.assertEqual(raw_output, "")
+
+        moss_output = "private MOSS reasoning</think>\nA visible MOSS prompt."
+        cleaned, raw_output, removed = prepare_output(MossAdapter(), moss_output, True)
+        self.assertTrue(removed)
+        self.assertEqual(cleaned, "A visible MOSS prompt.")
+        self.assertEqual(raw_output, moss_output)
 
     def test_model_thinking_checkbox_is_explicit_and_request_local(self) -> None:
         self.assertIn(
@@ -1240,10 +1255,17 @@ class PublicMetadataTests(unittest.TestCase):
         self.assertIn("FORGY_REPLY:\nVisible answer.", cleaned)
 
         cleaned, removed = strip_thinking(
-            "prefilled-prefix reasoning</think>\nVisible answer."
+            "prefilled-prefix reasoning</think>\nVisible answer.",
+            prefilled_thinking=True,
         )
         self.assertTrue(removed)
         self.assertEqual(cleaned, "Visible answer.")
+
+        cleaned, removed = strip_thinking(
+            "A visible KREA2 prompt.</think>",
+        )
+        self.assertTrue(removed)
+        self.assertEqual(cleaned, "A visible KREA2 prompt.")
 
         cleaned, removed = strip_thinking("<analysis>unfinished private reasoning")
         self.assertTrue(removed)

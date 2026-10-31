@@ -301,8 +301,15 @@ class AnimaAdapter:
         return text.strip()
 
     @staticmethod
-    def strip_model_thinking(text: str) -> tuple[str, bool]:
-        return strip_model_thinking(text)
+    def strip_model_thinking(
+        text: str,
+        *,
+        prefilled_thinking: bool = False,
+    ) -> tuple[str, bool]:
+        return strip_model_thinking(
+            text,
+            prefilled_thinking=prefilled_thinking,
+        )
 
     @staticmethod
     def repetition_loop_suffix(token_ids: list[int]) -> tuple[int, int] | None:
