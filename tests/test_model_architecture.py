@@ -686,6 +686,40 @@ class ModelArchitectureTests(unittest.TestCase):
             [("text", {"value": 1}), ("image", {"value": 2})],
         )
 
+    def test_all_qwen_adapters_keep_visible_output_and_hide_reasoning(self) -> None:
+        adapters = (
+            Krea2Adapter(),
+            ZImageAdapter(),
+            Flux2KleinAdapter(),
+            AnimaAdapter(),
+            MossAdapter(),
+        )
+
+        for adapter in adapters:
+            with self.subTest(adapter=adapter.adapter_id, output="trailing-close"):
+                visible, removed = adapter.strip_model_thinking(
+                    "A visible image prompt.</think>",
+                    prefilled_thinking=False,
+                )
+                self.assertTrue(removed)
+                self.assertEqual(visible, "A visible image prompt.")
+
+            with self.subTest(adapter=adapter.adapter_id, output="unexpected-thinking"):
+                visible, removed = adapter.strip_model_thinking(
+                    "private reasoning</think>\nA visible image prompt.",
+                    prefilled_thinking=False,
+                )
+                self.assertTrue(removed)
+                self.assertEqual(visible, "A visible image prompt.")
+
+            with self.subTest(adapter=adapter.adapter_id, output="prefilled-thinking"):
+                visible, removed = adapter.strip_model_thinking(
+                    "private reasoning</think>\nA visible image prompt.",
+                    prefilled_thinking=True,
+                )
+                self.assertTrue(removed)
+                self.assertEqual(visible, "A visible image prompt.")
+
     def test_capability_manager_disables_only_unsupported_workflows(self) -> None:
         capabilities = ModelCapabilities(
             workflows=frozenset(Workflow),

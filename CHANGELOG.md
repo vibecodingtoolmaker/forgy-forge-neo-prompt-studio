@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Fixed a KREA2 Idea-to-Prompt and Image-to-Prompt regression introduced by the
+  shared MOSS/Qwen thinking diagnostics. A trailing generated `</think>` token no
+  longer causes normal no-thinking output before it to be discarded. When text
+  follows the close, the prefix is still removed as unexpected reasoning. The
+  same visible-output/privacy contract is covered for KREA2, Z-Image, FLUX.2
+  Klein, Anima, and MOSS; MOSS's request-local thinking cleanup remains intact.
+
 ## 0.6.0-alpha.2 - 2026-10-29
 
 - Made fresh persona stores runtime-level Default-only. Forgy no longer seeds
